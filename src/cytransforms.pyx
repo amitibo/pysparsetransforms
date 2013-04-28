@@ -1,627 +1,371 @@
 """
 """
 
-from __future__ import division
 import scipy.sparse as sps
 import numpy as np
-import itertools
+cimport numpy as np
+import cython
+from cpython cimport bool
+from libc.math cimport sqrt
+from .base import processGrids, limitDGrids
 
-#
-# Some globals
-#
-SPARSE_SIZE_LIMIT = 1e6
-GRID_DIM_LIMIT = 100
+DTYPEd = np.double
+ctypedef np.double_t DTYPEd_t
+DTYPEi32 = np.int32
+ctypedef np.int32_t DTYPEi32_t
+DTYPEi = np.int
+ctypedef np.int_t DTYPEi_t
 
+DEF eps = 1e-10
 
-def eps(array):
-    """Return the eps value for the specific type of the input array."""
-    import numpy as np
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef inline np.intp_t local_argsearch_left(double [:] grid, double key):
 
-    return np.finfo(array.dtype).eps
-
-
-def calcTransformMatrix(src_grids, dst_coords):
-    """
-    Calculate a sparse transformation matrix. The transform
-    is represented as a mapping from the src_coords to the dst_coords.
+    cdef np.intp_t imin = 0
+    cdef np.intp_t imax = grid.size
+    cdef np.intp_t imid
     
-    Parameters
-    ----------
-    src_grids : list of arrays
-        Array of source grids.
+    while imin < imax:
+        imid = imin + ((imax - imin) >> 1)
         
-    dst_coords : list of arrays
-        Array of destination grids as points in the source grids.
-        
-    Returns
-    -------
-    H : parse matrix
-        Sparse matrix, in csr format, representing the transform.
-"""
-    
-    #
-    # Shape of grid
-    #
-    src_shape = src_grids[0].shape
-    src_size = np.prod(np.array(src_shape))
-    dst_shape = dst_coords[0].shape
-    dst_size = np.prod(np.array(dst_shape))
-    dims = len(src_shape)
-    
-    #
-    # Calculate grid indices of coords.
-    #
-    indices, src_grids_slim = coords2Indices(src_grids, dst_coords)
-
-    #
-    # Filter out coords outside of the grids.
-    #
-    nnz = np.ones(indices[0].shape, dtype=np.bool_)
-    for ind, dim in zip(indices, src_shape):
-        nnz *= (ind > 0) * (ind < dim)
-
-    dst_indices = np.arange(dst_size)[nnz]
-    nnz_indices = []
-    nnz_coords = []
-    for ind, coord in zip(indices, dst_coords):
-        nnz_indices.append(ind[nnz])
-        nnz_coords.append(coord.ravel()[nnz])
-    
-    #
-    # Calculate the transform matrix.
-    #
-    diffs = []
-    indices = []
-    for grid, coord, ind in zip(src_grids_slim, nnz_coords, nnz_indices):
-        diffs.append([grid[ind] - coord, coord - grid[ind-1]])
-        indices.append([ind-1, ind])
-
-    diffs = np.array(diffs)
-    diffs /= np.sum(diffs, axis=1).reshape((dims, 1, -1))
-    indices = np.array(indices)
-
-    dims_range = np.arange(dims)
-    strides = np.array(src_grids[0].strides).reshape((-1, 1))
-    strides /= strides[-1]
-    I, J, VALUES = [], [], []
-    for sli in itertools.product(*[[0, 1]]*dims):
-        i = np.array(sli)
-        c = indices[dims_range, sli, Ellipsis]
-        v = diffs[dims_range, sli, Ellipsis]
-        I.append(dst_indices)
-        J.append(np.sum(c*strides, axis=0))
-        VALUES.append(np.prod(v, axis=0))
-        
-    H = sps.coo_matrix(
-        (np.array(VALUES).ravel(), np.array((np.array(I).ravel(), np.array(J).ravel()))),
-        shape=(dst_size, src_size)
-        ).tocsr()
-
-    return H
-
-
-def coords2Indices(grids, coords):
-    """
-    """
-
-    inds = []
-    slim_grids = []
-    for dim, (grid, coord) in enumerate(zip(grids, coords)):
-        sli = [0] * len(grid.shape)
-        sli[dim] = Ellipsis
-        grid = grid[sli]
-        slim_grids.append(grid)
-        inds.append(np.searchsorted(grid, coord.ravel()))
-
-    return inds, slim_grids
-
-        
-def polarTransformMatrix(X, Y, center, radius_res=None, angle_res=None):
-    """(sparse) matrix representation of cartesian to polar transform.
-    params:
-        X, Y - 2D arrays that define the cartesian coordinates
-        center - Center (in cartesian coords) of the polar coordinates.
-        radius_res, angle_res - Resolution of polar coordinates.
- """
-
-    if X.ndim == 1:
-        X, Y = np.meshgrid(X, Y)
-
-    if radius_res == None:
-        radius_res = max(*X.shape)
-
-    if angle_res == None:
-        angle_res = radius_res
-
-    #
-    # Create the polar grid over which the target matrix (H) will sample.
-    #
-    max_R = np.max(np.sqrt((X-center[0])**2 + (Y-center[1])**2))
-    T, R = np.meshgrid(np.linspace(0, np.pi, angle_res), np.linspace(0, max_R, radius_res))
-
-    #
-    # Calculate the indices of the polar grid in the Cartesian grid.
-    #
-    X_ = R * np.cos(T) + center[0]
-    Y_ = R * np.sin(T) + center[1]
-
-    #
-    # Calculate the transform
-    #
-    H = calcTransformMatrix((Y, X), (Y_, X_))
-
-    return H, T, R
-
-
-def sphericalTransformMatrix(Y, X, Z, center, radius_res=None, phi_res=None, theta_res=None):
-    """(sparse) matrix representation of cartesian to polar transform.
-    params:
-        X, Y - 2D arrays that define the cartesian coordinates
-        center - Center (in cartesian coords) of the polar coordinates.
-        radius_res, angle_res - Resolution of polar coordinates.
- """
-
-    if radius_res == None:
-        radius_res = max(*X.shape)
-
-    if phi_res == None:
-        phi_res = radius_res
-        theta_res = radius_res
-
-    #
-    # Create the polar grid over which the target matrix (H) will sample.
-    #
-    max_R = np.max(np.sqrt((Y-center[0])**2 + (X-center[1])**2 + (Z-center[2])**2))
-    R, PHI, THETA = np.mgrid[0:max_R:complex(0, radius_res), 0:2*np.pi:complex(0, phi_res), 0:np.pi/2*0.9:complex(0, theta_res)]
-
-    #
-    # Calculate the indices of the polar grid in the Cartesian grid.
-    #
-    X_ = R * np.sin(THETA) * np.cos(PHI) + center[0]
-    Y_ = R * np.sin(THETA) * np.sin(PHI) + center[1]
-    Z_ = R * np.cos(THETA) + center[2]
-
-    #
-    # Calculate the transform
-    #
-    H = calcTransformMatrix((Y, X, Z), (Y_, X_, Z_))
-
-    return H, R, PHI, THETA
-
-
-def rotationTransformMatrix(X, Y, angle, X_dst=None, Y_dst=None):
-    """(sparse) matrix representation of rotation transform.
-    params:
-        X, Y - 2D arrays that define the cartesian coordinates
-        angle - Angle of rotation [radians].
-        dst_shape - Shape of the destination matrix (after rotation). Defaults
-             to the shape of the full matrix after rotation (no cropping).
-        X_rot, Y_rot - grid in the rotated coordinates (optional, calculated if not given). 
-"""
-
-    H_rot = np.array(
-        [[np.cos(angle), -np.sin(angle), 0],
-         [np.sin(angle), np.cos(angle), 0],
-         [0, 0, 1]]
-        )
-
-    if X_dst == None:
-        X_slim = X[0, :]
-        Y_slim = Y[:, 0]
-        x0_src = np.floor(np.min(X_slim)).astype(np.int)
-        y0_src = np.floor(np.min(Y_slim)).astype(np.int)
-        x1_src = np.ceil(np.max(X_slim)).astype(np.int)
-        y1_src = np.ceil(np.max(Y_slim)).astype(np.int)
-        
-        coords = np.hstack((
-            np.dot(H_rot, np.array([[x0_src], [y0_src], [1]])),
-            np.dot(H_rot, np.array([[x0_src], [y1_src], [1]])),
-            np.dot(H_rot, np.array([[x1_src], [y0_src], [1]])),
-            np.dot(H_rot, np.array([[x1_src], [y1_src], [1]]))
-            ))
-
-        x0_dst, y0_dst, dump = np.floor(np.min(coords, axis=1)).astype(np.int)
-        x1_dst, y1_dst, dump = np.ceil(np.max(coords, axis=1)).astype(np.int)
-
-        dxy_dst = min(np.min(np.abs(X_slim[1:]-X_slim[:-1])), np.min(np.abs(Y_slim[1:]-Y_slim[:-1])))
-        X_dst, Y_dst = np.meshgrid(
-            np.linspace(x0_dst, x1_dst, int((x1_dst-x0_dst)/dxy_dst)+1),
-            np.linspace(y0_dst, y1_dst, int((y1_dst-y0_dst)/dxy_dst)+1)
-        )
-
-    #
-    # Calculate a rotated grid by applying the rotation.
-    #
-    XY_dst = np.vstack((X_dst.ravel(), Y_dst.ravel(), np.ones(X_dst.size)))
-    XY_src_ = np.dot(np.linalg.inv(H_rot), XY_dst)
-
-    X_indices = XY_src_[0, :].reshape(X_dst.shape)
-    Y_indices = XY_src_[1, :].reshape(X_dst.shape)
-
-    H = calcTransformMatrix((Y, X), (Y_indices, X_indices))
-
-    return H, X_dst, Y_dst
-
-
-def rotation3DTransformMatrix(Y, X, Z, rotation, Y_dst=None, X_dst=None, Z_dst=None):
-    """(sparse) matrix representation of rotation transform.
-    params:
-        X, Y - 2D arrays that define the cartesian coordinates
-        angle - Angle of rotation [radians].
-        dst_shape - Shape of the destination matrix (after rotation). Defaults
-             to the shape of the full matrix after rotation (no cropping).
-        X_rot, Y_rot - grid in the rotated coordinates (optional, calculated if not given). 
-
-
-    Calculate a (sparse) matrix representation of rotation transform in 3D.
-    
-    Parameters
-    ----------
-    Y, X, Z : array,
-        List of grids. The grids are expected to be of the form created by mgrid
-        and in the same order of creation. This implies that the first member has
-        its changing dimension as the first dimension the second member should
-        have its second dimension changing etc. It also implies that the grid should
-        change only in one dimension each.
-        
-    rotation : list of floats or rotation matrix
-        Either a list of floats representating the rotation in Y, X, Z axes.
-        The rotations are applied separately in this order. Alternatively, rotation
-        can be a 4x4 rotation matrix
-    
-    Y_dst, X_dst, Z_dst : array, optional (default=None)
-        List of grids. The grids are expected to be of the form created by mgrid
-        and in the same order of creation. The transform is calculated into these
-        grids. This enables croping of the target domain after the rotation transform.
-        If none, the destination grids will be calculated to contain the full transformed
-        source.
-    
-    Returns
-    -------
-    H : sparse matrix in CSR format,
-        Transform matrix the implements the rotation transform.
-        
-    H_rot : array [4x4]
-        The rotation transform as calculated from the input rotation parameter.
-        
-    Y_dst, X_dst, Z_dst : array,
-        Target grid. Either the input Y_dst, X_dst, Z_dst or the calculated grid.
-"""
-
-    if isinstance(rotation, np.ndarray) and rotation.shape == (4, 4):
-        H_rot = rotation
-    else:
-        H_rot = _calcRotationMatrix(rotation)
-        
-    if X_dst == None:
-        Y_dst, X_dst, Z_dst = _calcRotateGrid(Y, X, Z, H_rot)
-
-    #
-    # Calculate a rotated grid by applying the rotation.
-    #
-    XYZ_dst = np.vstack((X_dst.ravel(), Y_dst.ravel(), Z_dst.ravel(), np.ones(X_dst.size)))
-    XYZ_src_ = np.dot(np.linalg.inv(H_rot), XYZ_dst)
-
-    Y_indices = XYZ_src_[1, :].reshape(X_dst.shape)
-    X_indices = XYZ_src_[0, :].reshape(X_dst.shape)
-    Z_indices = XYZ_src_[2, :].reshape(X_dst.shape)
-
-    H = calcTransformMatrix((Y, X, Z), (Y_indices, X_indices, Z_indices))
-
-    return H, H_rot, Y_dst, X_dst, Z_dst
-
-
-def _calcRotationMatrix(rotation):
-    
-    #
-    # Calculate the rotation transform
-    #
-    theta, phi, psi = rotation
-
-    H_rotx = np.array(
-        [
-            [1, 0, 0, 0],
-            [0, np.cos(theta), -np.sin(theta), 0],
-            [0, np.sin(theta), np.cos(theta), 0],
-            [0, 0, 0, 1]]
-        )
-
-    H_roty = np.array(
-        [
-            [np.cos(phi), 0, np.sin(phi), 0],
-            [0, 1, 0, 0],
-            [-np.sin(phi), 0, np.cos(phi), 0],
-            [0, 0, 0, 1]]
-        )
-
-    H_rotz = np.array(
-        [
-            [np.cos(psi), -np.sin(psi), 0, 0],
-            [np.sin(psi), np.cos(psi), 0, 0],
-            [0, 0, 1, 0],
-            [0, 0, 0, 1]]
-        )
-
-    H_rot = np.dot(H_rotz, np.dot(H_roty, H_rotx))
-    
-    return H_rot
-
-
-def _calcRotateGrid(Y, X, Z, H_rot):
-    #
-    # Calculate the target grid.
-    # The calculation is based on calculating the minimal grid that contains
-    # the transformed input grid.
-    #
-    Y_slim = Y[:, 0, 0]
-    X_slim = X[0, :, 0]
-    Z_slim = Z[0, 0, :]
-    x0_src = np.floor(np.min(X_slim)).astype(np.int)
-    y0_src = np.floor(np.min(Y_slim)).astype(np.int)
-    z0_src = np.floor(np.min(Z_slim)).astype(np.int)
-    x1_src = np.ceil(np.max(X_slim)).astype(np.int)
-    y1_src = np.ceil(np.max(Y_slim)).astype(np.int)
-    z1_src = np.ceil(np.max(Z_slim)).astype(np.int)
-
-    src_coords = np.array(
-        [
-            [x0_src, x0_src, x1_src, x1_src, x0_src, x0_src, x1_src, x1_src],
-            [y0_src, y1_src, y0_src, y1_src, y0_src, y1_src, y0_src, y1_src],
-            [z0_src, z0_src, z0_src, z0_src, z1_src, z1_src, z1_src, z1_src],
-            [1, 1, 1, 1, 1, 1, 1, 1]
-        ]
-    )
-    dst_coords = np.dot(H_rot, src_coords)
-
-    
-    x0_dst, y0_dst, z0_dst, dump = np.floor(np.min(dst_coords, axis=1)).astype(np.int)
-    x1_dst, y1_dst, z1_dst, dump = np.ceil(np.max(dst_coords, axis=1)).astype(np.int)
-
-    #
-    # Calculate the grid density.
-    # Note:
-    # This calculation is important as having a dense grid results in a huge transform
-    # matrix even if it is sparse.
-    #
-    dy = Y_slim[1] - Y_slim[0]
-    dx = X_slim[1] - X_slim[0]
-    dz = Z_slim[1] - Z_slim[0]
-
-    delta_src_coords = np.array(
-        [
-            [0, dx, 0, 0, -dx, 0, 0],
-            [0, 0, dy, 0, 0, -dy, 0],
-            [0, 0, 0, dz, 0, 0, -dz],
-            [1, 1, 1, 1, 1, 1, 1]
-        ]
-    )
-    delta_dst_coords = np.dot(H_rot, delta_src_coords)
-    delta_dst_coords.sort(axis=1)
-    delta_dst_coords = delta_dst_coords[:, 1:] - delta_dst_coords[:, :-1]
-    delta_dst_coords[delta_dst_coords<=0] = 10000000
-    
-    dx, dy, dz, dump = np.min(delta_dst_coords, axis=1)
-    x_samples = min(int((x1_dst-x0_dst)/dx), GRID_DIM_LIMIT)
-    y_samples = min(int((y1_dst-y0_dst)/dy), GRID_DIM_LIMIT)
-    z_samples = min(int((z1_dst-z0_dst)/dz), GRID_DIM_LIMIT)
-    
-    dim_ratio = x_samples * y_samples * z_samples / SPARSE_SIZE_LIMIT
-    if  dim_ratio > 1:
-        dim_reduction = dim_ratio ** (-1/3)
-        
-        x_samples = int(x_samples * dim_reduction)
-        y_samples = int(y_samples * dim_reduction)
-        z_samples = int(z_samples * dim_reduction)
-        
-    Y_dst, X_dst, Z_dst = np.mgrid[
-        y0_dst:y1_dst:complex(0, y_samples),
-        x0_dst:x1_dst:complex(0, x_samples),
-        z0_dst:z1_dst:complex(0, z_samples),
-    ]
-    return Y_dst, X_dst, Z_dst
-
-
-def gridDerivatives(grids, forward=True):
-    """
-    Calculate first order partial derivatives for a list of grids.
-    
-    Parameters
-    ----------
-    grids : list,
-        List of grids. The grids are expected to be of the form created by mgrid
-        and in the same order of creation. This implies that the first member has
-        its changing dimension as the first dimension the second member should
-        have its second dimension changing etc. It also implies that the grid should
-        change only in one dimension each.
-        
-    forward : boolean, optional (default=True)
-        Forward or backward derivatives.
-        
-    Returns
-    -------
-    derivatives : list,
-        List of the corresponding derivatives, as 1D arrays.
-    """
-
-    derivatives = []
-    for dim, grid in enumerate(grids):
-        sli = [0] * len(grid.shape)
-        sli[dim] = Ellipsis
-        grid = grid[sli]
-        derivative = np.abs(grid[1:] - grid[:-1])
-        if forward:
-            derivative = np.concatenate((derivative, (derivative[-1],)))
+        if grid[imid] < key:
+            imin = imid + 1
         else:
-            derivative = np.concatenate(((derivative[0],), derivative))
-        derivatives.append(derivative)
+            imax = imid
 
-    return derivatives
+    return imin
     
 
-def cumsumTransformMatrix(grids, axis=0, direction=1, masked_rows=None):
-    """
-    Calculate a (sparse) matrix representation of integration (cumsum) transform.
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef inline bool interpolatePoints(
+    double[:] grid,
+    np.intp_t i0,
+    np.intp_t i1,
+    np.intp_t si,
+    np.intp_t dim,
+    double[:] p0,
+    double[:] d,
+    int[:, ::1] I,
+    double[:, ::1] P
+    ):
     
-    Parameters
-    ----------
-    grids : list,
-        List of grids. The length of grids should correspond to the
-        dimensions of the grid.
-        
-    axis : int, optional (default=0)
-        Axis along which the cumsum operation is preformed.
+    cdef np.intp_t i, j, k
+    cdef np.intp_t dt
     
-    direction : {1, -1}, optional (default=1)
-        Direction of integration, 1 for integrating up the indices
-        -1 for integrating down the indices.
-       
-    masked_rows: array, optional(default=None)
-        If not None, leave only the rows that are non zero in the
-        masked_rows array.
-    
-    Returns
-    -------
-    H : sparse matrix in CSR format,
-        Transform matrix the implements the cumsum transform.
-"""
-        
-    grid_shape = grids[0].shape
-    strides = np.array(grids[0].strides).reshape((-1, 1))
-    strides /= strides[-1]
+    if i0 == i1:
+        return False
 
-    derivatives = gridDerivatives(grids)
-
-    inner_stride = strides[axis]
-    if direction == 1:
-        inner_stride = -inner_stride
-        
-    inner_size = np.prod(grid_shape[axis:])
-
-    inner_H = sps.spdiags(
-        np.ones((grid_shape[axis], inner_size))*derivatives[axis].reshape((-1, 1)),
-        inner_stride*np.arange(grid_shape[axis]),
-        inner_size,
-        inner_size)
-    
-    if axis == 0:
-        H = inner_H
+    if i0 > i1:
+        i0 -= 1
+        i1 -= 1
+        dt = -1
     else:
-        m = np.prod(grid_shape[:axis])
-        H = sps.kron(sps.eye(m, m), inner_H)
-
-    if masked_rows != None:
-        H = H.tolil()
-        indices = masked_rows.ravel() == 0
-        for i in indices.nonzero()[0]:
-            H.rows[i] = []
-            H.data[i] = []
+        dt = 1
     
-    return H.tocsr()
+    #
+    # Loop on the dimension
+    #
+    for j in xrange(3):
+        #
+        # Loop on all the intersections of a dimension
+        #
+        i = si
+        for k in xrange(i0, i1, dt):
+            #
+            # Calculate the indices of the points
+            #
+            if j == dim:
+                I[j, i] = dt
+
+            #
+            # Interpolate the value at the point
+            #
+            P[j, i] = d[j]/d[dim] * (grid[k]-p0[dim]) + p0[j]
+
+            i += 1
+
+    return True
 
 
-def integralTransformMatrix(grids, axis=0, direction=1):
-    """
-    Calculate a (sparse) matrix representation of an integration transform.
+@cython.boundscheck(False)
+@cython.wraparound(False)
+cdef calcCrossings(
+    double[:] Y,
+    double[:] X,
+    double[:] Z,
+    double[:] p0,
+    double[:] p1
+    ):
+    #
+    # Collect the inter indices (grid crossings)
+    #
+    cdef np.intp_t i, j, k, sort_index
+    cdef np.intp_t points_num
+    cdef np.intp_t x_i0, x_i1, y_i0, y_i1, z_i0, z_i1
+    cdef np.intp_t dimx = X.size - 1
+    cdef np.intp_t dimz = Z.size - 1
+    cdef double tmpd
+    cdef int tmpi
     
-    Parameters
-    ----------
-    grids : list
-        List of grids. The grids are expected to be of the form created by mgrid
-        and in the same order of creation.
+    y_i0 = local_argsearch_left(Y, p0[0])
+    y_i1 = local_argsearch_left(Y, p1[0])
+    x_i0 = local_argsearch_left(X, p0[1])
+    x_i1 = local_argsearch_left(X, p1[1])
+    z_i0 = local_argsearch_left(Z, p0[2])
+    z_i1 = local_argsearch_left(Z, p1[2])
     
-    axis : int, optional (default=0)
-        The axis by which the integration is performed.
+    #
+    # Calculate inter points (grid crossings)
+    #
+    cdef double[:] d = np.empty(3)
+    d[0] = p1[0] - p0[0]
+    d[1] = p1[1] - p0[1]
+    d[2] = p1[2] - p0[2]
+    points_num = abs(y_i1 - y_i0) + abs(x_i1 - x_i0) + abs(z_i1 - z_i0)
+
+    #
+    # Note:
+    # The np_r, np_indices arrays are declared separately
+    # as these are values that are returned from the function.
+    #
+    np_r = np.empty(points_num+1)
+    np_indices = np.empty(points_num+1, dtype=DTYPEi32)
+    cdef double[:] r = np_r
+    cdef int[:] indices = np_indices
+    
+    #
+    # Check whether the start and end points are in the same voxel
+    #
+    if points_num == 0:
+        tmpd = 0
+        for i in range(3):
+            tmpd += d[i]**2
+        r[0] = sqrt(tmpd)
+        indices[0] = dimz*(dimx*(y_i0-1) + x_i0-1) + z_i0-1
+        return np_r, np_indices
+    
+    np_I = np.zeros((3, points_num), dtype=DTYPEi32)
+    np_P = np.empty((3, points_num))
+    cdef int[:, ::1] I = np_I
+    cdef double[:, ::1] P = np_P
+    
+    if interpolatePoints(Y, y_i0, y_i1, 0, 0, p0, d, I, P):
+        sort_index = 0
+    if interpolatePoints(X, x_i0, x_i1, abs(y_i1 - y_i0), 1, p0, d, I, P):
+        sort_index = 1
+    if interpolatePoints(Z, z_i0, z_i1, abs(y_i1 - y_i0)+abs(x_i1 - x_i0), 2, p0, d, I, P):
+        sort_index = 2
+
+    #
+    # Sort points according to their spatial order
+    #
+    np_order = np.argsort(P[sort_index, :]).astype(DTYPEi32)
+    cdef int[:] order = np_order
+
+    np_SI = np.empty((3, points_num+2), dtype=DTYPEi32)
+    np_SP = np.empty((3, points_num+2))
+    cdef int[:, ::1] SI = np_SI
+    cdef double[:, ::1] SP = np_SP
+    
+    SI[0, 0] = max(y_i0-1, 0)
+    SI[1, 0] = max(x_i0-1, 0)
+    SI[2, 0] = max(z_i0-1, 0)
+    SI[0, points_num+1] = max(y_i1-1, 0)
+    SI[1, points_num+1] = max(x_i1-1, 0)
+    SI[2, points_num+1] = max(z_i1-1, 0)
+    SP[0, 0] = p0[0]
+    SP[1, 0] = p0[1]
+    SP[2, 0] = p0[2]
+    SP[0, points_num+1] = p1[0]
+    SP[1, points_num+1] = p1[1]
+    SP[2, points_num+1] = p1[2]
+    
+    if p0[sort_index] > p1[sort_index]:
+        for i in range(3):        
+            for j in range(points_num):
+                 SI[i, j+1] = SI[i, j] + I[i, order[points_num-1-j]]
+                 SP[i, j+1] = P[i, order[points_num-1-j]]
+    else:
+        for i in range(3):        
+            for j in range(points_num):
+                 SI[i, j+1] = SI[i, j] + I[i, order[j]]
+                 SP[i, j+1] = P[i, order[j]]
+
+    #
+    # Calculate path segments length
+    #
+    for j in range(points_num+1):
+        tmpd = 0
+        for i in range(3):
+            tmpd += (SP[i, j+1] - SP[i, j])**2
+        r[j] = sqrt(tmpd)
+        indices[j] = dimz*(dimx*SI[0, j] + SI[1, j]) + SI[2, j]
+    
+    #
+    # Order the indices
+    #
+    if indices[0] > indices[points_num]:
+        for j in range(points_num+1):
+            tmpd = r[j]
+            r[j] = r[points_num-j]
+            r[points_num-j] = tmpd
+            tmpi = indices[j]
+            indices[j] = indices[points_num-j]
+            indices[points_num-j] = tmpi
+
+    return np_r, np_indices
+
+
+@cython.boundscheck(False)
+def point2grids(point, Y, X, Z):
+    
+    #
+    # Calculate open and centered grids
+    #
+    (Y, X, Z), (Y_open, X_open, Z_open) = processGrids((Y, X, Z))
+
+    cdef DTYPEd_t [:] p_Y = Y.ravel()
+    cdef DTYPEd_t [:] p_X = X.ravel()
+    cdef DTYPEd_t [:] p_Z = Z.ravel()
+
+    p1 = np.array(point, order='C').ravel()
+    np_p2 = np.empty(3)    
+    cdef double[:] p2 = np_p2
+
+    data = []
+    indices = []
+    indptr = [0]
+    cdef int grid_size = Y.size
+    cdef int i = 0
+    for i in xrange(grid_size):
+        #
+        # Process next voxel
+        #
+        p2[0] = p_Y[i]
+        p2[1] = p_X[i]
+        p2[2] = p_Z[i]
         
-    direction : {1, -1}, optional (default=1)
-        Direction of integration
-        direction - 1: integrate up the indices, -1: integrate down the indices.
-        
-    Returns
-    -------
-    H : sparse matrix
-        Sparse matrix, in csr format, representing the transform.
-"""
+        #
+        # Calculate crossings for line between p1 and p2
+        #
+        r, ind = calcCrossings(Y_open, X_open, Z_open, p1, p2)
 
-    grid_shape = grids[0].shape
-    strides = np.array(grids[0].strides)
-    strides /= strides[-1]
+        #
+        # Accomulate the crossings for the sparse matrix
+        #
+        data.append(r)
+        indices.append(ind)
+        indptr.append(indptr[-1]+r.size)
 
-    derivatives = gridDerivatives(grids)
-
-    inner_stride = strides[axis]
+    #
+    # Form the sparse transform matrix
+    #
+    data = np.hstack(data)
+    indices = np.hstack(indices)
     
-    if direction != 1:
-        direction  = -1
-        
-    inner_height = np.abs(inner_stride)
-    inner_width = np.prod(grid_shape[axis:])
-
-    inner_H = sps.spdiags(
-        np.ones((grid_shape[axis], max(inner_height, inner_width)))*derivatives[axis].reshape((-1, 1))*direction,
-        inner_stride*np.arange(grid_shape[axis]),
-        inner_height,
-        inner_width
+    H_dist = sps.csr_matrix(
+        (data, indices, indptr),
+        shape=(Y.size, Y.size)
     )
     
-    if axis == 0:
-        H = inner_H
-    else:
-        m = np.prod(grid_shape[:axis])
-        H = sps.kron(sps.eye(m, m), inner_H)
-
-    return H.tocsr()
-
-
-def cameraTransformMatrix(PHI, THETA, focal_ratio=0.5, image_res=256):
-    """
-    Calculate a sparse matrix representation of camera projection transform.
+    return H_dist
     
-    Parameters
-    ----------
-    PHI, THETA : 3D arrays
-        \phi and \theta angle grids.
-    
-    focal_ratio : float, optional (default=0.5)
-        Ratio between the focal length of the camera and the size of the sensor.
-    
-    image_res : int, optional (default=256)
-        Resolution of the camera image (both dimensions)
-        
-    Returns
-    -------
-    H : sparse matrix
-        Sparse matrix, in csr format, representing the transform.
-"""
 
-    Y, X = np.mgrid[-1:1:complex(0, image_res), -1:1:complex(0, image_res)]
-    PHI_ = np.arctan2(Y, X) + np.pi
-    R_ = np.sqrt(X**2 + Y**2 + focal_ratio**2)
-    THETA_ = np.arccos(focal_ratio / (R_ + eps(R_)))
+@cython.boundscheck(False)
+def direction2grids(phi, theta, Y, X, Z):
+    
+    #
+    # Calculate open and centered grids
+    #
+    (Y, X, Z), (Y_open, X_open, Z_open) = processGrids((Y, X, Z))
+
+    cdef DTYPEd_t [:] p_Y = Y.ravel()
+    cdef DTYPEd_t [:] p_X = X.ravel()
+    cdef DTYPEd_t [:] p_Z = Z.ravel()
 
     #
-    # Calculate the transform
+    # Calculate the intersection with the TOA (Top Of Atmosphere)
     #
-    H = calcTransformMatrix((PHI, THETA), (PHI_, THETA_))
+    toa = np.max(Z_open)
+    DZ = toa - Z
+    DX = DZ * np.cos(phi) * np.tan(theta)
+    DY = DZ * np.sin(phi) * np.tan(theta)
 
-    return H
+    #
+    # Check crossing with any of the sides
+    #
+    ratio, L = limitDGrids(DY, Y, np.min(Y_open), np.max(Y_open))
+    if np.any(L):
+        DY[L] *= ratio[L]
+        DX[L] *= ratio[L]
+        DZ[L] *= ratio[L]
+    ratio, L = limitDGrids(DX, X, np.min(X_open), np.max(X_open))
+    if np.any(L):
+        DY[L] *= ratio[L]
+        DX[L] *= ratio[L]
+        DZ[L] *= ratio[L]
+    ratio, L = limitDGrids(DZ, Z, np.min(Z_open), np.max(Z_open))
+    if np.any(L):
+        DY[L] *= ratio[L]
+        DX[L] *= ratio[L]
+        DZ[L] *= ratio[L]
 
+    cdef DTYPEd_t [:] p_DY = DY.ravel()
+    cdef DTYPEd_t [:] p_DX = DX.ravel()
+    cdef DTYPEd_t [:] p_DZ = DZ.ravel()
 
-def spdiag(X):
-    """
-    Return a sparse diagonal matrix. The elements of the diagonal are made of 
-    the elements of the vector X.
-
-    Parameters
-    ----------
-    X : array
-        1D array to be placed on the diagonal.
+    cdef double[:] p1 = np.empty(3)
+    cdef double[:] p2 = np.empty(3)
+    
+    data = []
+    indices = []
+    indptr = [0]
+    cdef int grid_size = Y.size
+    cdef int i = 0
+    for i in xrange(grid_size):
+        #
+        # Center of each voxel
+        #
+        p1[0] = p_Y[i]
+        p1[1] = p_X[i]
+        p1[2] = p_Z[i]
         
-    Returns
-    -------
-    H : sparse matrix
-        Sparse diagonal matrix, in dia format.
-"""
+        #
+        # Intersection of the ray with the TOA
+        #
+        p2[0] = p1[0] + p_DY[i]
+        p2[1] = p1[1] + p_DX[i]
+        p2[2] = p1[2] + p_DZ[i]
+        
+        #
+        # Calculate crossings for line between p1 and p2
+        #
+        r, ind = calcCrossings(Y_open, X_open, Z_open, p1, p2)
+        
+        #
+        # Accomulate the crossings for the sparse matrix
+        # Note:
+        # I remove values lower than some epsilon value.
+        # This way I filter out numerical inacurracies and
+        # negative values.
+        #
+        zr = r > eps
+        r = r[zr]
+        data.append(r)
+        indices.append(ind[zr])
+        indptr.append(indptr[-1]+r.size)
 
-    return sps.dia_matrix((X.ravel(), 0), (X.size, X.size))
-
-
+    #
+    # Form the sparse transform matrix
+    #
+    data = np.hstack(data)
+    indices = np.hstack(indices)
+    
+    H_dist = sps.csr_matrix(
+        (data, indices, indptr),
+        shape=(Y.size, Y.size)
+    )
+    
+    return H_dist

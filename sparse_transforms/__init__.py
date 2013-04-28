@@ -10,5 +10,7 @@ pySparseTransforms is available under the
 .. codeauthor:: Amit Aides <amitibo@tx.technion.ac.il>
 """
 
-from cytransforms import polarTransformMatrix, sphericalTransformMatrix, rotationTransformMatrix, \
-     rotation3DTransformMatrix, cumsumTransformMatrix, integralTransformMatrix, cameraTransformMatrix, spdiag
+#from cytransforms import polarTransformMatrix, sphericalTransformMatrix, rotationTransformMatrix, \
+     #rotation3DTransformMatrix, cumsumTransformMatrix, integralTransformMatrix, cameraTransformMatrix, spdiag
+
+from base import *
