@@ -8,6 +8,31 @@ import time
 
 class TestTransforms(unittest.TestCase):
     
+    def test01(self):
+        """Test basic functions of the transform"""
+        
+        from scipy.sparse import lil_matrix
+        
+        A = lil_matrix((1000, 1000))
+        A[0, :100] = np.random.rand(100)
+        A[1, 100:200] = A[0, :100]
+        A.setdiag(np.random.rand(1000))
+        A.tocsr()
+        
+        B = lil_matrix((1000, 1000))
+        B[0, :100] = np.random.rand(100)
+        B[1, 100:200] = B[0, :100]
+        B.setdiag(np.random.rand(1000))
+        B.tocsr()
+
+        T1 = spt.BaseTransform(A)
+        T2 = spt.BaseTransform(B)
+        
+        C = T1 + T2
+        
+        self.assertTrue(isinstance(C, spt.BaseTransform))
+        self.assertTrue(np.allclose((A+B).todense(), C.H.todense()))
+        
     @unittest.skip("not implemented")    
     def test2D(self):
     

@@ -3,9 +3,11 @@
 
 from __future__ import division
 import numpy as np
+import scipy.sparse as sps
 import copy
+import types
 
-__all__ = ['TransformBase', 'Grids']
+__all__ = ['BaseTransform', 'Grids']
 
 
 class Grids(object):
@@ -64,14 +66,45 @@ class Grids(object):
         raise NotImplemented('Not implemented yet')
 
 
-class TransformBase(object):
+def patchNumericMethods(cls, method_name, inplace=False):
+    """Add methods (__add__ etc) to a class."""
+    
+    def wrapper(self, other):
+        
+        if isinstance(other, BaseTransform):
+            other = other.H
+        
+        #
+        # Call the underlying matrix method
+        #
+        H = getattr(self.H, method_name)(other)
+        
+        if inplace:
+            #
+            # Change the object inplace
+            #
+            obj = self
+        else:
+            #
+            # Return a copy
+            #
+            obj = copy.copy(self)
+            
+        obj.H = H
+        
+        return obj
+    
+    setattr(cls, method_name, wrapper)
+
+
+class BaseTransform(object):
     """
     Base class for transforms
 
     Attributes
     ----------
-    name : string
-        Name of transform.
+    H : sparse matrix.
+        The underlying sparse matrix.
     shape : (int, int)
         The shape of the transform.
     in_grids : tuple of open grids
@@ -85,74 +118,50 @@ class TransformBase(object):
     -------
     """
 
-    def __init__(self, name, H, in_grids=None, out_grids=None):
+    def __new__(cls, *args, **kwargs):
+
+        #
+        # Delegate numeric methods to the encapsulated
+        # sparse matrix. The reason to do it in the __new__
+        # method is that python looks for this methods (__add__ etc)
+        # in the class and not the object. So it is not possible
+        # to overwrite __getattr__ for these methods.
+        #
+        NUMERIC_METHODS = ('add', 'sub', 'mul')
+        binary_methods = ['__{method}__'.format(method=method) for method in NUMERIC_METHODS]
+        binary_methods += ['__r{method}__'.format(method=method) for method in NUMERIC_METHODS]
+        augmented_methods = ['__i{method}__'.format(method=method) for method in NUMERIC_METHODS]
+        
+        for method_name in binary_methods: 
+            patchNumericMethods(cls, method_name, inplace=False)
+            
+        for method_name in augmented_methods:
+            patchNumericMethods(cls, method_name, inplace=True)
+        
+        return object.__new__(cls, *args, **kwargs)
+
+        
+    def __init__(self, H, in_grids=None, out_grids=None):
         """
         Parameters
         ----------
-        name : string
-            Name of transform.
         H : sparse matrix
             The matrix the represents the transform.
-        in_signal_shape : tuple of integers, optional (default=None)
-            The shape of the input signal. The product of `in_signal_shape` should
-            be equal to `shape[1]`. If `None`, then it is set to (shape[1], 1).
-        out_signal_shape : tuple of ints
-            The shape of the output signal. The product of `out_signal_shape` should
-            be equal to `shape[1]`. If `in_signal_shape=None`, then it is set to
-            (shape[0], 1). If `out_signal_shape=None` and `shape[0]=shape[1]` then
-            `out_signal_shape=in_signal_shape`.
+        in_grids : tuple of open grids
+            The set of grids over which the input is defined.
+        out_grids : tuple of open grids
+            The set of grids over which the output is defined.
         """
         
-        #if in_signal_shape==None:
-            #in_signal_shape = (H.shape[1], 1)
-            #out_signal_shape = (H.shape[0], 1)            
-        #elif out_signal_shape==None:
-            #if H.shape[0]==H.shape[1]:
-                #out_signal_shape = in_signal_shape
-            #else:
-                #out_signal_shape = (H.shape[0], 1)
+        self.H = H
+        self.in_grids = in_grids
+        self.out_grids = out_grids
             
-        #assert np.prod(in_signal_shape)==shape[1], 'Input signal shape does not conform to the shape of the transform'
-        #assert np.prod(out_signal_shape)==shape[0], 'Output signal shape does not conform to the shape of the transform'
-            
-        self._name = name
-        self._H = H
-        self._in_grids = in_grids
-        self._out_grids = out_grids
-        self._conj = False
-            
-    @property
-    def name(self):
-        """Name of transform.
-        """
-        return self._name
-        
     @property
     def shape(self):
         """The shape of the transform.
         """
-        if self._conj:
-            return self._H.shape[::-1]
-        else:
-            return self._H.shape
-        
-    @property
-    def in_shape(self):
-        """The shape of the input signal for the transform.
-        """
-        if self._conj:
-            return self._out_grids.shape
-        else:
-            return self._in_grids.shape
-    
-    @property
-    def out_shape(self):
-        """The shape of the output signal for the transform.
-        """
-        if self._conj:
-            return self._in_grids.shape
-        else:
-            return self._out_grids.shape
+        return self.H.shape
         
     @property
     def T(self):
@@ -160,55 +169,11 @@ class TransformBase(object):
         """
         import copy
 
-        new_copy = copy.copy(self)
-        new_copy._conj = True
-        return new_copy
+        new_obj = self.__class__(self.H.T, in_grids=self.out_grids, out_grids=self.in_grids)
 
-    def _checkDimensions(self, x):
-        """Check that the size of the input signal is correct.
-        This function is called by the `__call__` method.
-        
-        Parameters
-        ==========
-        x : array
-            Input signal in columnstack order.
-        """
+        return new_obj
 
-        if x.shape == (1, 1) and self._shape != (1, 1):
-            raise Exception('transform-scalar multiplication not yet supported')
 
-        if x.shape[0] != self.shape[1]:
-            raise Exception('Incompatible dimensions')
-
-        if x.shape[1] != 1:
-            raise Exception('transform-matrix multiplication not yet supported')
-    
-    def _apply(self, x):
-        """Apply the transform on the input signal. Should be overwritten by the transform.
-        This function is called by the `__call__` method.
-        
-        Parameters
-        ==========
-        x : array
-            Input signal in columnstack order.
-        """
-        
-        if self._conj:
-            y = np.dot(self._H.T, x)
-        else:
-            y = np.dot(self._H, x)
-
-        return y
-        
-    def __call__(self, x):
-        
-        x = x.reshape((-1, 1))
-        
-        self._checkDimensions(x)
-
-        return self._apply(x).reshape(self._out_grids.shape)
-    
-    
 def spdiag(X):
     """
     Return a sparse diagonal matrix. The elements of the diagonal are made of 
