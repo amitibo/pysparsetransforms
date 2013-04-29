@@ -3,12 +3,12 @@
 
 from __future__ import division
 import numpy as np
-from .base import *
-import itertools
 import scipy.sparse as sps
+from .base import *
 from cytransforms import point2grids, direction2grids
+import itertools
 
-__all__ = ['DirectionTransform', 'SensorTransform']
+__all__ = ['DirectionTransform', 'IntegralTransform', 'SensorTransform', 'CumsumTransform']
 
 
 class DirectionTransform(BaseTransform):
@@ -30,6 +30,144 @@ class DirectionTransform(BaseTransform):
         
         super(DirectionTransform, self).__init__(
             H=H,
+            in_grids=in_grids,
+            out_grids=in_grids
+        )
+
+
+class IntegralTransform(BaseTransform):
+    """
+    Representation of an integration transform.
+    """
+    
+    def __init__(
+        self,
+        in_grids,
+        jacobian=None,
+        axis=0,
+        direction=1
+        ):
+        """
+        Parameters
+        ----------
+        in_grids : Grids object
+            List of grids. 
+        
+        jacobian : array like (default=None)
+            If given, will be used as the Jacobian of the integration.
+            
+        axis : int, optional (default=0)
+            The axis by which the integration is performed.
+            
+        direction : {1, -1}, optional (default=1)
+            Direction of integration
+            direction - 1: integrate up the indices, -1: integrate down the indices.
+        """
+        
+        grid_shape = in_grids.shape
+        strides = np.array(in_grids.expanded[0].strides)
+        strides /= strides[-1]
+    
+        derivatives = in_grids.derivatives
+    
+        inner_stride = strides[axis]
+        
+        if direction != 1:
+            direction  = -1
+            
+        inner_height = np.abs(inner_stride)
+        inner_width = np.prod(grid_shape[axis:])
+    
+        inner_H = sps.spdiags(
+            np.ones((grid_shape[axis], max(inner_height, inner_width)))*derivatives[axis].reshape((-1, 1))*direction,
+            inner_stride*np.arange(grid_shape[axis]),
+            inner_height,
+            inner_width
+        )
+        
+        if axis == 0:
+            H = inner_H
+        else:
+            m = np.prod(grid_shape[:axis])
+            H = sps.kron(sps.eye(m, m), inner_H)
+    
+        H = H.tocsr()
+        
+        if jacobian != None:
+            H = H * spdiag(jacobian)
+        
+        temp = range(in_grids.ndim)
+        temp.remove(axis)
+        out_grids = [in_grids[i] for i in temp]
+        super(IntegralTransform, self).__init__(
+            H=H,
+            in_grids=in_grids,
+            out_grids=Grids(*out_grids)
+        )
+    
+
+class CumsumTransform(BaseTransform):
+
+    def __init__(
+        self,
+        in_grids,
+        axis=0,
+        direction=1,
+        masked_rows=None
+        ):
+        """
+        Calculate a (sparse) matrix representation of integration (cumsum) transform.
+        
+        Parameters
+        ----------
+        in_grids : Grids object
+            List of grids. 
+        
+        axis : int, optional (default=0)
+            Axis along which the cumsum operation is preformed.
+        
+        direction : {1, -1}, optional (default=1)
+            Direction of integration, 1 for integrating up the indices
+            -1 for integrating down the indices.
+           
+        masked_rows: array, optional(default=None)
+            If not None, leave only the rows that are non zero in the
+            masked_rows array.
+    """
+            
+        grid_shape = in_grids.shape
+        strides = np.array(in_grids.expanded[0].strides)
+        strides /= strides[-1]
+    
+        derivatives = in_grids.derivatives
+        
+        inner_stride = strides[axis]
+        if direction == 1:
+            inner_stride = -inner_stride
+            
+        inner_size = np.prod(grid_shape[axis:])
+    
+        inner_H = sps.spdiags(
+            np.ones((grid_shape[axis], inner_size))*derivatives[axis].reshape((-1, 1)),
+            inner_stride*np.arange(grid_shape[axis]),
+            inner_size,
+            inner_size)
+        
+        if axis == 0:
+            H = inner_H
+        else:
+            m = np.prod(grid_shape[:axis])
+            H = sps.kron(sps.eye(m, m), inner_H)
+    
+        if masked_rows != None:
+            H = H.tolil()
+            indices = masked_rows.ravel() == 0
+            for i in indices.nonzero()[0]:
+                H.rows[i] = []
+                H.data[i] = []
+        
+        super(CumsumTransform, self).__init__(
+            H=H.tocsr(),
             in_grids=in_grids,
             out_grids=in_grids
         )

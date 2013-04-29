@@ -74,8 +74,25 @@ class Grids(object):
             closed_grids.append(np.ascontiguousarray(closed_grid))
 
         return closed_grids
-            
+
+    @property
+    def derivatives(self):
+        """
+        Calculate first order partial derivatives. Returns a list of 1D arrays.
+        """
+    
+        derivatives = []
+        for grid in self._grids:
+            derivative = np.abs(grid.ravel()[1:] - grid.ravel()[:-1])
+            derivative = np.concatenate((derivative, (derivative[-1],)))
+            derivatives.append(derivative)
+    
+        return derivatives
+
     def translate(self, translation):
+        """
+        Return a Grid object which is a translation of the original grid.
+        """
         translation = np.array(translation)
         assert translation.size == self.ndim, 'translation must have the same dimension of grids'
         
@@ -172,9 +189,9 @@ class BaseTransform(object):
         The underlying sparse matrix.
     shape : (int, int)
         The shape of the transform.
-    in_grids : tuple of open grids
+    in_grids : Grids object
         The set of grids over which the input is defined.
-    out_grids : tuple of open grids
+    out_grids : Grids object
         The set of grids over which the output is defined.
     T : type(self)
         The transpose of the transform.

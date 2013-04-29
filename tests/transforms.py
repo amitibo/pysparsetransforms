@@ -97,6 +97,44 @@ class TestTransforms(unittest.TestCase):
         amitibo.viz3D(Y_sensor, X_sensor, Z_sensor, y)
         mlab.show()
 
+    def test04(self):
+        """Test the integral transform"""
+        
+        Y, X, Z = self.grids.expanded
+        
+        H = spt.IntegralTransform(
+            in_grids=self.grids
+        )
+        
+        x = (X<1.).astype(np.float)
+        y = H * x
+        
+        import amitibo
+        import mayavi.mlab as mlab
+        amitibo.viz3D(Y, X, Z, x)
+        mlab.show()
+
+        plt.figure()
+        plt.imshow(y)
+        plt.show()
+        
+    def test05(self):
+        """Test the integral transform"""
+        
+        Y, X, Z = self.grids.expanded
+        
+        H = spt.CumsumTransform(
+            in_grids=self.grids
+        )
+        
+        x = (X<1.).astype(np.float)
+        y = H * x
+        
+        import amitibo
+        import mayavi.mlab as mlab
+        amitibo.viz3D(Y, X, Z, x)
+        amitibo.viz3D(Y, X, Z, y)
+
     @unittest.skip("not implemented")    
     def test2D(self):
     
