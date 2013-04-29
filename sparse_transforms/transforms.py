@@ -64,7 +64,7 @@ class SensorTransform(BaseTransform):
         #
         # Calculate sample steps along ray
         #
-        R_max = np.max(np.sqrt(centered_grids[0]**2 + centered_grids[1]**2 + centered_grids[2]**2))
+        R_max = np.max(np.sqrt(centered_grids.expanded[0]**2 + centered_grids.expanded[1]**2 + centered_grids.expanded[2]**2))
         R_samples, R_step = np.linspace(0.0, R_max, samples_num, retstep=True)
         R_samples = R_samples[1:]
         R_dither = np.random.rand(sensor_res, sensor_res) * R_step * dither_noise
@@ -72,7 +72,7 @@ class SensorTransform(BaseTransform):
         #
         # Calculate depth bins
         #
-        depth_bins = np.logspace(np.log10(R_samples[0]), np.log10(R_samples[-1]+1), depth_res+1)-1
+        depth_bins = np.logspace(np.log10(R_samples[0]), np.log10(R_samples[-1]+R_step), depth_res+1)
         samples_bin = np.digitize(R_samples, depth_bins)
         samples_array = []
         for i in range(1, depth_res+1):
@@ -81,7 +81,7 @@ class SensorTransform(BaseTransform):
         #
         # Create the output grids
         #
-        out_grids = Grids(Y_sensor, X_sensor, depth_bins[:-1])
+        out_grids = Grids(depth_bins[:-1], Y_sensor, X_sensor)
         
         #
         # Randomly replicate rays inside each pixel
@@ -145,24 +145,24 @@ class SensorTransform(BaseTransform):
                 X_indices = np.searchsorted(X, X_ray.ravel())
                 Z_indices = np.searchsorted(Z, Z_ray.ravel())
                 
-                #
-                # Calculate unique indices
-                #
                 Y_filter = (Y_indices > 0) * (Y_indices < Y.size)
                 X_filter = (X_indices > 0) * (X_indices < X.size)
                 Z_filter = (Z_indices > 0) * (Z_indices < Z.size)
                 
-                Y_indices = Y_indices[Y_filter*X_filter*Z_filter]-1
-                X_indices = X_indices[Y_filter*X_filter*Z_filter]-1
-                Z_indices = Z_indices[Y_filter*X_filter*Z_filter]-1
+                filtered = Y_filter*X_filter*Z_filter
+                Y_indices = Y_indices[filtered]-1
+                X_indices = X_indices[filtered]-1
+                Z_indices = Z_indices[filtered]-1
         
+                #
+                # Calculate unique indices
+                #
                 inds_ray = (Y_indices*centered_grids.shape[1] + X_indices)*centered_grids.shape[2] + Z_indices
+                uniq_indices, inv_indices = np.unique(inds_ray, return_inverse=True)
                 
                 #
                 # Calculate weights
                 #
-                uniq_indices, inv_indices = np.unique(inds_ray, return_inverse=True)
-        
                 weights = []
                 for i, ind in enumerate(uniq_indices):
                     weights.append((inv_indices == i).sum())

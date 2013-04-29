@@ -10,9 +10,9 @@ class TestTransforms(unittest.TestCase):
     
     def setUp(self):
         
-        self.Y = np.linspace(0, 1, 10)
-        self.X = np.linspace(0, 2, 20)
-        self.Z = np.linspace(0, 3, 30)
+        self.Y = np.linspace(0, 2, 30)
+        self.X = np.linspace(0, 2, 30)
+        self.Z = np.linspace(0, 2, 30)
         
         self.grids = spt.Grids(self.Y, self.X, self.Z)
         
@@ -75,14 +75,18 @@ class TestTransforms(unittest.TestCase):
         
         H = spt.SensorTransform(
             in_grids=self.grids,
-            sensor_center=(.5, 1., 0),
-            sensor_res=32,
-            depth_res=32
+            sensor_center=(1.0, 1., 0.0),
+            sensor_res=16,
+            depth_res=16
         )
         
         print time.time() - t0
     
-        x = (Z>1.5).astype(np.float)
+        #plt.gray()
+        #plt.imshow((H.H.todense()>0).astype(np.float), interpolation='nearest')
+        #plt.show()
+        
+        x = (Z<0.2).astype(np.float)
         y = H * x
         
         import amitibo
