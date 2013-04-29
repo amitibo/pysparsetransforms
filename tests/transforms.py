@@ -8,6 +8,14 @@ import time
 
 class TestTransforms(unittest.TestCase):
     
+    def setUp(self):
+        
+        self.Y = np.linspace(0, 1, 10)
+        self.X = np.linspace(0, 2, 20)
+        self.Z = np.linspace(0, 3, 30)
+        
+        self.grids = spt.Grids(self.Y, self.X, self.Z)
+        
     def test01(self):
         """Test basic functions of the transform"""
         
@@ -33,6 +41,58 @@ class TestTransforms(unittest.TestCase):
         self.assertTrue(isinstance(C, spt.BaseTransform))
         self.assertTrue(np.allclose((A+B).todense(), C.H.todense()))
         
+        C = T1 * T2
+        
+        self.assertTrue(isinstance(C, spt.BaseTransform))
+        self.assertTrue(np.allclose(np.dot(A, B).todense(), C.H.todense()))
+    
+    def test02(self):
+        """Test the direction transform"""
+        
+        Y, X, Z = self.grids.expanded
+        
+        t0 = time.time()
+        
+        H = spt.DirectionTransform(self.grids, 0, np.pi/2)
+        
+        print time.time() - t0
+    
+        x = (Y<.5)
+        y = H * x
+        
+        import amitibo
+        import mayavi.mlab as mlab
+        
+        amitibo.viz3D(Y, X, Z, y)
+        mlab.show()
+        
+    def test03(self):
+        """Test the sensor transform"""
+        
+        Y, X, Z = self.grids.expanded
+        
+        t0 = time.time()
+        
+        H = spt.SensorTransform(
+            in_grids=self.grids,
+            sensor_center=(.5, 1., 0),
+            sensor_res=32,
+            depth_res=32
+        )
+        
+        print time.time() - t0
+    
+        x = (Z>1.5).astype(np.float)
+        y = H * x
+        
+        import amitibo
+        import mayavi.mlab as mlab
+        
+        amitibo.viz3D(Y, X, Z, x)
+        Y_sensor, X_sensor, Z_sensor = H.out_grids.expanded
+        amitibo.viz3D(Y_sensor, X_sensor, Z_sensor, y)
+        mlab.show()
+
     @unittest.skip("not implemented")    
     def test2D(self):
     

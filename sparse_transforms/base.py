@@ -7,7 +7,7 @@ import scipy.sparse as sps
 import copy
 import types
 
-__all__ = ['BaseTransform', 'Grids']
+__all__ = ['BaseTransform', 'Grids', 'calcTransformMatrix']
 
 
 class Grids(object):
@@ -52,6 +52,29 @@ class Grids(object):
     def ndim(self):
         return self._ndim
     
+    @property
+    def expanded(self):
+        """Expand the open grids to full grids"""
+        
+        expanded_grids = []
+        for i, grid in enumerate(self._grids):
+            tiles = list(self.shape)
+            tiles[i] = 1
+            expanded_grids.append(np.tile(grid, tiles))
+        
+        return expanded_grids
+            
+    @property
+    def closed(self):
+        """Retrun a list of closed grids (i.e. include the upper border of the grid)"""
+        
+        closed_grids = []
+        for grid in self._grids:
+            closed_grid = np.hstack((grid.ravel(), 2*grid.ravel()[-1]-grid.ravel()[-2]))
+            closed_grids.append(np.ascontiguousarray(closed_grid))
+
+        return closed_grids
+            
     def translate(self, translation):
         translation = np.array(translation)
         assert translation.size == self.ndim, 'translation must have the same dimension of grids'
@@ -97,6 +120,48 @@ def patchNumericMethods(cls, method_name, inplace=False):
     setattr(cls, method_name, wrapper)
 
 
+def patchMulMethods(cls, method_name):
+    """Add method __mul__ to a class."""
+    
+    def wrapper(self, other):
+        
+        other_is_transform = False
+        other_reshaped = False
+        
+        if isinstance(other, BaseTransform):
+            other_is_transform = True
+            other = other.H
+        elif not sps.issparse(other):
+            if other.ndim != 2 or other.shape[1] != 1:
+                other_reshaped = True
+                other = other.reshape((-1, 1))
+        
+        #
+        # Call the underlying matrix method
+        #
+        H = getattr(self.H, method_name)(other)
+        
+        if other_is_transform:
+            #
+            # Return a copy
+            #
+            obj = copy.copy(self)
+            
+            obj.H = H
+        else:
+            #
+            # Return the result of the underlying matrix
+            #
+            obj = H
+            
+            if other_reshaped:
+                obj = obj.reshape(self.out_grids.shape)
+            
+        return obj
+    
+    setattr(cls, method_name, wrapper)
+
+
 class BaseTransform(object):
     """
     Base class for transforms
@@ -127,7 +192,7 @@ class BaseTransform(object):
         # in the class and not the object. So it is not possible
         # to overwrite __getattr__ for these methods.
         #
-        NUMERIC_METHODS = ('add', 'sub', 'mul')
+        NUMERIC_METHODS = ('add', 'sub')
         binary_methods = ['__{method}__'.format(method=method) for method in NUMERIC_METHODS]
         binary_methods += ['__r{method}__'.format(method=method) for method in NUMERIC_METHODS]
         augmented_methods = ['__i{method}__'.format(method=method) for method in NUMERIC_METHODS]
@@ -138,6 +203,9 @@ class BaseTransform(object):
         for method_name in augmented_methods:
             patchNumericMethods(cls, method_name, inplace=True)
         
+        for method_name in ('__mul__', '__rmul__'): 
+            patchMulMethods(cls, method_name)
+            
         return object.__new__(cls, *args, **kwargs)
 
         
@@ -335,20 +403,6 @@ def coords2Indices(grids, coords):
         inds.append(np.searchsorted(grid, coord.ravel()))
 
     return inds, slim_grids
-
-
-def limitDGrids(DGrid, Grid, lower_limit, upper_limit):
-    ratio = np.ones_like(DGrid)
-    
-    Ll = (Grid + DGrid) < lower_limit
-    if np.any(Ll):
-        ratio[Ll] = (lower_limit - Grid[Ll]) / DGrid[Ll]
-        
-    Lh = (Grid + DGrid) > upper_limit
-    if np.any(Lh):
-        ratio[Lh] = (upper_limit - Grid[Lh]) / DGrid[Lh]
-    
-    return ratio, Ll + Lh
 
 
 def main():

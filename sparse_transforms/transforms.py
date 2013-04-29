@@ -4,6 +4,35 @@
 from __future__ import division
 import numpy as np
 from .base import *
+import itertools
+import scipy.sparse as sps
+from cytransforms import point2grids, direction2grids
+
+__all__ = ['DirectionTransform', 'SensorTransform']
+
+
+class DirectionTransform(BaseTransform):
+    
+    def __init__(
+        self,
+        in_grids,
+        direction_phi,
+        direction_theta
+        ):
+        
+        H = direction2grids(
+            direction_phi,
+            direction_theta,
+            in_grids.expanded[0],
+            in_grids.expanded[1],
+            in_grids.expanded[2]
+        )
+        
+        super(DirectionTransform, self).__init__(
+            H=H,
+            in_grids=in_grids,
+            out_grids=in_grids
+        )
 
 
 class SensorTransform(BaseTransform):
@@ -22,8 +51,9 @@ class SensorTransform(BaseTransform):
         #
         # Center the grids
         #
-        in_grids = in_grids.translate(sensor_center)
-      
+        centered_grids = in_grids.translate(-np.array(sensor_center))
+        Y, X, Z = centered_grids.closed
+        
         #
         # Convert image pixels to ray direction
         # The image is assumed the [-1, 1]x[-1, 1] square.
@@ -34,10 +64,10 @@ class SensorTransform(BaseTransform):
         #
         # Calculate sample steps along ray
         #
-        R_max = np.max(np.sqrt(in_grids[0]**2 + in_grids[1]**2 + in_grids[2]**2))
+        R_max = np.max(np.sqrt(centered_grids[0]**2 + centered_grids[1]**2 + centered_grids[2]**2))
         R_samples, R_step = np.linspace(0.0, R_max, samples_num, retstep=True)
         R_samples = R_samples[1:]
-        R_dither = np.random.rand(R_img.size) * R_step * dither_noise
+        R_dither = np.random.rand(sensor_res, sensor_res) * R_step * dither_noise
         
         #
         # Calculate depth bins
@@ -111,22 +141,22 @@ class SensorTransform(BaseTransform):
                 #
                 # Calculate the atmosphere indices
                 #
-                Y_indices = np.searchsorted(Y_atmo, Y_ray.ravel())
-                X_indices = np.searchsorted(X_atmo, X_ray.ravel())
-                Z_indices = np.searchsorted(Z_atmo, Z_ray.ravel())
+                Y_indices = np.searchsorted(Y, Y_ray.ravel())
+                X_indices = np.searchsorted(X, X_ray.ravel())
+                Z_indices = np.searchsorted(Z, Z_ray.ravel())
                 
                 #
                 # Calculate unique indices
                 #
-                Y_filter = (Y_indices > 0) * (Y_indices < Y_atmo.size)
-                X_filter = (X_indices > 0) * (X_indices < X_atmo.size)
-                Z_filter = (Z_indices > 0) * (Z_indices < Z_atmo.size)
+                Y_filter = (Y_indices > 0) * (Y_indices < Y.size)
+                X_filter = (X_indices > 0) * (X_indices < X.size)
+                Z_filter = (Z_indices > 0) * (Z_indices < Z.size)
                 
                 Y_indices = Y_indices[Y_filter*X_filter*Z_filter]-1
                 X_indices = X_indices[Y_filter*X_filter*Z_filter]-1
                 Z_indices = Z_indices[Y_filter*X_filter*Z_filter]-1
         
-                inds_ray = (Y_indices*in_grids.shape[1] + X_indices)*in_grids.shape[2] + Z_indices
+                inds_ray = (Y_indices*centered_grids.shape[1] + X_indices)*centered_grids.shape[2] + Z_indices
                 
                 #
                 # Calculate weights
@@ -152,11 +182,10 @@ class SensorTransform(BaseTransform):
     
         H = sps.csr_matrix(
             (data, indices, indptr),
-            shape=(img_res*img_res*depth_res, in_grids.size)
+            shape=(sensor_res*sensor_res*depth_res, centered_grids.size)
         )
 
         super(SensorTransform, self).__init__(
-            name='SensorTransform',
             H=H,
             in_grids=in_grids,
             out_grids=out_grids

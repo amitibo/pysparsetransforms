@@ -7,7 +7,7 @@ cimport numpy as np
 import cython
 from cpython cimport bool
 from libc.math cimport sqrt
-from .base import processGrids, limitDGrids
+from .base import processGrids
 
 DTYPEd = np.double
 ctypedef np.double_t DTYPEd_t
@@ -216,6 +216,29 @@ cdef calcCrossings(
             indices[points_num-j] = tmpi
 
     return np_r, np_indices
+
+
+def limitDGrids(DGrid, Grid, lower_limit, upper_limit):
+    """
+    Check wheter the addition of some DGrid to Grid
+    will cause it to cross a lower_ or upper_ limit.
+    
+    Retruns:
+    ratio - ratio of the crossing
+    L - indices that cross (when incremented by DGrid.
+    """
+    
+    ratio = np.ones_like(DGrid)
+    
+    Ll = (Grid + DGrid) < lower_limit
+    if np.any(Ll):
+        ratio[Ll] = (lower_limit - Grid[Ll]) / DGrid[Ll]
+        
+    Lh = (Grid + DGrid) > upper_limit
+    if np.any(Lh):
+        ratio[Lh] = (upper_limit - Grid[Lh]) / DGrid[Lh]
+    
+    return ratio, Ll + Lh
 
 
 @cython.boundscheck(False)
