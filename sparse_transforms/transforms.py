@@ -222,9 +222,24 @@ class SensorTransform(BaseTransform):
         out_grids = Grids(depth_bins[:-1], Y_sensor, X_sensor)
         
         #
-        # Randomly replicate rays inside each pixel
+        # Calculate inverse grid
         #
         X_sensor, Y_sensor = np.meshgrid(X_sensor, Y_sensor)
+        R_sensor = np.sqrt(X_sensor**2 + Y_sensor**2)
+        R = out_grids.expanded[0]
+        THETA = R_sensor * np.pi / 2
+        PHI = np.arctan2(Y_sensor, X_sensor)
+        THETA = np.tile(THETA[np.newaxis, :, :], [depth_res, 1, 1])
+        PHI = np.tile(PHI[np.newaxis, :, :], [depth_res, 1, 1])
+        Y_inv = R * np.sin(THETA) * np.sin(PHI)
+        X_inv = R * np.sin(THETA) * np.cos(PHI)
+        Z_inv = R * np.cos(THETA)
+
+        inv_grids = GeneralGrids(Y_inv, X_inv, Z_inv)
+        
+        #
+        # Randomly replicate rays inside each pixel
+        #
         X_sensor = np.tile(X_sensor[:, :, np.newaxis], [1, 1, replicate])
         Y_sensor = np.tile(Y_sensor[:, :, np.newaxis], [1, 1, replicate])
         X_sensor += np.random.rand(*X_sensor.shape)*step
@@ -232,12 +247,12 @@ class SensorTransform(BaseTransform):
         
         #
         # Calculate rays angles
-        # R_img is the radius from the center of the image (0, 0) to the
+        # R_sensor is the radius from the center of the image (0, 0) to the
         # pixel. It is used for calculating th ray direction (PHI, THETA)
         # and for filtering pixels outside the image (radius > 1).
         #
-        R_img = np.sqrt(X_sensor**2 + Y_sensor**2)
-        THETA_ray = R_img * np.pi / 2
+        R_sensor = np.sqrt(X_sensor**2 + Y_sensor**2)
+        THETA_ray = R_sensor * np.pi / 2
         PHI_ray = np.arctan2(Y_sensor, X_sensor)
         DY_ray = np.sin(THETA_ray) * np.sin(PHI_ray)
         DX_ray = np.sin(THETA_ray) * np.cos(PHI_ray)
@@ -251,7 +266,7 @@ class SensorTransform(BaseTransform):
         indptr = [0]
         for samples in samples_array:
             for r, dy, dx, dz, r_dither in itertools.izip(
-                R_img.reshape((-1, replicate)),
+                R_sensor.reshape((-1, replicate)),
                 DY_ray.reshape((-1, replicate)),
                 DX_ray.reshape((-1, replicate)),
                 DZ_ray.reshape((-1, replicate)),
@@ -326,7 +341,8 @@ class SensorTransform(BaseTransform):
         super(SensorTransform, self).__init__(
             H=H,
             in_grids=in_grids,
-            out_grids=out_grids
+            out_grids=out_grids,
+            inv_grids=inv_grids
         )
 
 

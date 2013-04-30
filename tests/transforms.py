@@ -46,6 +46,16 @@ class TestTransforms(unittest.TestCase):
         self.assertTrue(isinstance(C, spt.BaseTransform))
         self.assertTrue(np.allclose(np.dot(A, B).todense(), C.H.todense()))
     
+        x = np.random.rand(1000, 1)
+        b = T1 * x
+        
+        self.assertTrue(np.allclose(b, A * x))
+    
+        T3 = -T1
+        
+        self.assertTrue(np.allclose(T3.H.todense(), -(T1.H.todense())))
+    
+
     def test02(self):
         """Test the direction transform"""
         
@@ -135,6 +145,8 @@ class TestTransforms(unittest.TestCase):
         amitibo.viz3D(Y, X, Z, x)
         amitibo.viz3D(Y, X, Z, y)
 
+        mlab.show()
+        
     @unittest.skip("not implemented")    
     def test2D(self):
     

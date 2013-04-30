@@ -6,11 +6,16 @@ import numpy as np
 import scipy.sparse as sps
 import copy
 import types
+from .transformation_matrices import euler_matrix
 
-__all__ = ['BaseTransform', 'Grids', 'calcTransformMatrix']
+__all__ = ['BaseTransform', 'Grids', 'GeneralGrids', 'calcTransformMatrix']
 
 
 class Grids(object):
+    """
+    A class that eases the use of grids. This class is meant for use
+    with open grids.
+    """
     
     def __init__(self, *grids):
         
@@ -42,7 +47,7 @@ class Grids(object):
     
     @property
     def shape(self):
-        return tuple([grid.size for grid in self._grids])
+        return tuple([grid.shape[i] for i, grid in enumerate(self._grids)])
     
     @property
     def size(self):
@@ -106,6 +111,67 @@ class Grids(object):
         raise NotImplemented('Not implemented yet')
 
 
+class GeneralGrids(Grids):
+    """
+    A class that eases the use of grids. This class is meant for use
+    with general (not rectilinear) grids.
+    """
+    
+    def __init__(self, *grids):
+        
+        self._ndim = len(grids)
+        self._grids = grids
+        
+    @property
+    def expanded(self):
+        """Expand the open grids to full grids"""
+        
+        return self._grids
+            
+    @property
+    def closed(self):
+        """Retrun a list of closed grids (i.e. include the upper border of the grid)"""
+        
+        raise NotImplemented('Not implemented yet')
+
+    def rotate(self, ai, aj, ak):
+        """
+        Return a Grid object which is a rotation of the original grid.
+        Rotation is given in euler angles (axis used is 'sxyz')
+        """
+        
+        assert self.ndim == 3, 'Rotation supports only 3D grids'
+        
+        H_rot = euler_matrix(ai, aj, ak)
+        
+        XYZ = np.vstack([grid.ravel() for grid in self._grids] + [np.ones(self.size)])
+        XYZ_rotated = np.dot(H_rot, XYZ)
+    
+        rotated_grids = []
+        for i in range(self.ndim):
+            rotated_grids.append(XYZ_rotated[i, :].reshape(self.shape))
+            
+        return GeneralGrids(*rotated_grids)
+
+            
+def patchUnaryMethods(cls, method_name):
+    """ Add unary methods to a class."""
+    
+    def wrapper(self):
+        #
+        # Call the underlying matrix method
+        #
+        H = getattr(self.H, method_name)()
+        
+        obj = copy.copy(self)
+            
+        obj.H = H
+        
+        return obj
+    
+    setattr(cls, method_name, wrapper)
+    
+
 def patchNumericMethods(cls, method_name, inplace=False):
     """Add methods (__add__ etc) to a class."""
     
@@ -149,7 +215,7 @@ def patchMulMethods(cls, method_name):
             other_is_transform = True
             other = other.H
         elif not sps.issparse(other):
-            if other.ndim != 2 or other.shape[1] != 1:
+            if isinstance(other, np.ndarray) and (other.ndim != 2 or other.shape[1] != 1):
                 other_reshaped = True
                 other = other.reshape((-1, 1))
         
@@ -193,6 +259,8 @@ class BaseTransform(object):
         The set of grids over which the input is defined.
     out_grids : Grids object
         The set of grids over which the output is defined.
+    inv_grids : GeneralGrids object
+        The out_grids projected back into the in_grids.
     T : type(self)
         The transpose of the transform.
         
@@ -210,6 +278,7 @@ class BaseTransform(object):
         # to overwrite __getattr__ for these methods.
         #
         NUMERIC_METHODS = ('add', 'sub')
+        UNARY_METHODS = ('__neg__', '__pos__')
         binary_methods = ['__{method}__'.format(method=method) for method in NUMERIC_METHODS]
         binary_methods += ['__r{method}__'.format(method=method) for method in NUMERIC_METHODS]
         augmented_methods = ['__i{method}__'.format(method=method) for method in NUMERIC_METHODS]
@@ -223,10 +292,13 @@ class BaseTransform(object):
         for method_name in ('__mul__', '__rmul__'): 
             patchMulMethods(cls, method_name)
             
+        for method_name in UNARY_METHODS: 
+            patchUnaryMethods(cls, method_name)
+            
         return object.__new__(cls, *args, **kwargs)
 
         
-    def __init__(self, H, in_grids=None, out_grids=None):
+    def __init__(self, H, in_grids=None, out_grids=None, inv_grids=None):
         """
         Parameters
         ----------
@@ -236,11 +308,14 @@ class BaseTransform(object):
             The set of grids over which the input is defined.
         out_grids : tuple of open grids
             The set of grids over which the output is defined.
+        inv_grids : GeneralGrids object
+            The out_grids projected back into the in_grids.
         """
         
         self.H = H
         self.in_grids = in_grids
         self.out_grids = out_grids
+        self.inv_grids = inv_grids
             
     @property
     def shape(self):

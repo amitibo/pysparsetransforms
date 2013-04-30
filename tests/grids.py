@@ -14,6 +14,7 @@ class TestGrids(unittest.TestCase):
         
         self.grids = spt.Grids(self.Y, self.X, self.Z)
         self.expanded_grids = np.mgrid[0:1:10j, 1:2:20j, 2:3:30j]
+        self.general_grids = spt.GeneralGrids(*self.expanded_grids)
         
     def test01(self):
         """Check shape"""
@@ -46,6 +47,23 @@ class TestGrids(unittest.TestCase):
         for grid, ref_grid in zip(expanded_grids, self.expanded_grids):
             self.assertTrue(np.allclose(grid, ref_grid))
     
+    def test05(self):
+        """Test the general grid and its rotation"""
+        
+        Y, X, Z = self.general_grids.expanded
+        
+        Y_rot, X_rot, Z_rot = self.general_grids.rotate(0, np.pi/4, 0)
+        
+        import mayavi.mlab as mlab
+        import amitibo
+        
+        import amitibo
+        import mayavi.mlab as mlab
+        amitibo.viz3D(Y, X, Z, Y_rot)
+        amitibo.viz3D(Y, X, Z, X_rot)
+        amitibo.viz3D(Y, X, Z, Z_rot)
+        mlab.show()
+
 if __name__ == '__main__':
     unittest.main()
 
