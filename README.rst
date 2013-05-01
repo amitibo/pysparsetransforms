@@ -1,16 +1,16 @@
-================
-README for pyrwt
-================
+=============================
+README for pySparseTransforms
+=============================
 
-pyrwt is a python package that uses cython to wrap the
-RICE Wavelet Toolbox. It is fast and enables comparing
-the results of your python algorithm with the results
-of algorithms that use the Matlab toolbox.
+pySparseTransforms is a python package that introduces
+several classes the simplify the use of sparse matrices
+to represenet transforms.
 
 Installing
 ==========
 
-Use ``setup.py``::
+To install pySparseTransforms you will need Cython and C
+compilers. Use ``setup.py``::
 
    python setup.py install
 
@@ -31,9 +31,11 @@ Testing
 
 To run the tests with the interpreter available as ``python``, use::
 
-   cd examples
-   python denoise.py
+   cd tests
+   python grids.py
+   python transforms.py
 
+Some tests require other packages (e.g. mayavi).
 
 Conditions for use
 ==================

@@ -9,11 +9,11 @@ class TestGrids(unittest.TestCase):
     def setUp(self):
         
         self.Y = np.linspace(0, 1, 10)
-        self.X = np.linspace(1, 2, 20)
-        self.Z = np.linspace(2, 3, 30)
+        self.X = np.linspace(0, 2, 20)
+        self.Z = np.linspace(0, 3, 30)
         
         self.grids = spt.Grids(self.Y, self.X, self.Z)
-        self.expanded_grids = np.mgrid[0:1:10j, 1:2:20j, 2:3:30j]
+        self.expanded_grids = np.mgrid[0:2:20j, 0:2:20j, 0:2:20j]
         self.general_grids = spt.GeneralGrids(*self.expanded_grids)
         
     def test01(self):
@@ -52,13 +52,17 @@ class TestGrids(unittest.TestCase):
         
         Y, X, Z = self.general_grids.expanded
         
-        Y_rot, X_rot, Z_rot = self.general_grids.rotate(0, np.pi/4, 0)
+        Y_rot, X_rot, Z_rot = self.general_grids.rotate(np.pi/4, 0, 0)
         
         import mayavi.mlab as mlab
         import amitibo
         
         import amitibo
         import mayavi.mlab as mlab
+        amitibo.viz3D(Y, X, Z, Y)
+        amitibo.viz3D(Y, X, Z, X)
+        amitibo.viz3D(Y, X, Z, Z)
+
         amitibo.viz3D(Y, X, Z, Y_rot)
         amitibo.viz3D(Y, X, Z, X_rot)
         amitibo.viz3D(Y, X, Z, Z_rot)

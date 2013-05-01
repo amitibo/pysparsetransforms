@@ -7,6 +7,9 @@ import scipy.sparse as sps
 import copy
 import types
 from .transformation_matrices import euler_matrix
+import os
+import pickle
+import scipy.io as sio
 
 __all__ = ['BaseTransform', 'Grids', 'GeneralGrids', 'calcTransformMatrix']
 
@@ -45,6 +48,26 @@ class Grids(object):
     def copy(self):
         return copy.deepcopy(self)
     
+    def save(self, path):
+        """Save a copy of the grid"""
+        
+        np.savez(self._grids, path)
+
+    @classmethod
+    def load(cls, path):
+        """Load a copy of the grid"""
+        
+        path = os.path.abspath(path)
+        
+        base_path, ext = os.path.splitext(path)
+        if ext == '':
+            path = base_path + '.npz'
+            
+        l = np.load(path)
+        grids = [l[key] for key in sorted(l.files)]
+    
+        return cls(*grids)
+
     @property
     def shape(self):
         return tuple([grid.shape[i] for i, grid in enumerate(self._grids)])
@@ -316,7 +339,84 @@ class BaseTransform(object):
         self.in_grids = in_grids
         self.out_grids = out_grids
         self.inv_grids = inv_grids
+    
+    def save(self, path):
+        """Save a copy of the transform"""
+        
+        path = os.path.abspath(path)
+        
+        base_path, ext = os.path.splitext(path)
+        if ext == '':
+            ext = '.pkl'
+        
+        H_path = base_path + '_H.mat'
+        if self.in_grids:
+            in_path = base_path + '_in'
+            self.in_grids.save(in_path)
+        else:
+            in_path = None
             
+        if self.out_grids:
+            out_path = base_path + '_out'
+            self.out_grids.save(out_path)
+        else:
+            out_path = None
+            
+        if self.inv_grids:
+            inv_path = base_path + '_inv'
+            self.inv_grids.save(inv_path)
+        else:
+            inv_path = None
+        
+        sio.savemat(
+            H_path,
+            {
+                'H': self.H,
+            },
+            do_compression=True
+        )
+            
+        paths = {
+            'H': H_path,
+            'in': in_path,
+            'out': out_path,
+            'inv': inv_path
+            }
+        
+        with open(path, 'w') as f:
+            pickle.dump(
+                paths,
+                f
+            )
+    
+    @staticmethod
+    def load(path):
+        
+        path = os.path.abspath(path)
+        
+        base_path, ext = os.path.splitext(path)
+        if ext == '':
+            ext = '.pkl'
+        
+        with open(path, 'r') as f:
+            paths = pickle.load(f)
+        
+        H = sio.loadmat(paths['H'])['H']
+        if paths['in']:
+            in_grids = Grids.load(path['in'])
+        else:
+            in_grids = None
+        if paths['out']:
+            out_grids = Grids.load(path['out'])
+        else:
+            out_grids = None
+        if paths['inv']:
+            inv_grids = Grids.load(path['inv'])
+        else:
+            inv_grids = None
+            
+        return BaseTransform(H, in_grids=in_grids, out_grids=out_grids, inv_grids=inv_grids)
+        
     @property
     def shape(self):
         """The shape of the transform.

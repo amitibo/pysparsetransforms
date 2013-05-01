@@ -19,7 +19,7 @@ import sys
 NAME = 'pySparseTransforms'
 PACKAGE_NAME = 'sparse_transforms'
 VERSION = '0.1'
-DESCRIPTION = 'Sparse transforms package writen in cython'
+DESCRIPTION = 'Sparse transforms package writen in python and cython'
 LONG_DESCRIPTION = """
 """
 AUTHOR = 'Amit Aides'

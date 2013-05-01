@@ -15,7 +15,7 @@ class TestTransforms(unittest.TestCase):
         self.Z = np.linspace(0, 2, 30)
         
         self.grids = spt.Grids(self.Y, self.X, self.Z)
-        
+    
     def test01(self):
         """Test basic functions of the transform"""
         
@@ -54,7 +54,12 @@ class TestTransforms(unittest.TestCase):
         T3 = -T1
         
         self.assertTrue(np.allclose(T3.H.todense(), -(T1.H.todense())))
-    
+
+        T1.save('./test_save_transform')
+        T4 = spt.BaseTransform.load('./test_save_transform')
+        
+        self.assertTrue(np.allclose(T1.H.todense(), T4.H.todense()))
+        
 
     def test02(self):
         """Test the direction transform"""
@@ -146,7 +151,83 @@ class TestTransforms(unittest.TestCase):
         amitibo.viz3D(Y, X, Z, y)
 
         mlab.show()
+    
+    def test06(self):
+        """Test the SensorTransform"""
         
+        cart_grids = spt.Grids(np.linspace(0, 50, 20), np.linspace(0, 50, 20), np.linspace(0, 50, 20))
+        
+        H1 = spt.SensorTransform(in_grids=cart_grids, sensor_center=(25.0, 25.0, 0.0), sensor_res=128, depth_res=30, samples_num=4000)
+        H2 = spt.IntegralTransform(in_grids=H1.out_grids)
+        
+        #
+        # Create the GUI
+        #
+        from enthought.traits.api import HasTraits, Range, on_trait_change, Float
+        from enthought.traits.ui.api import View, Item, VGroup, EnumEditor
+        from enthought.chaco.api import Plot, ArrayPlotData, gray
+        from enthought.enable.component_editor import ComponentEditor
+
+        class resultAnalayzer(HasTraits):
+            """Gui Application"""
+            
+            x = Range(0, 19, desc='pixel coord x', enter_set=True,
+                      auto_set=False)
+            y = Range(0, 19, desc='pixel coord y', enter_set=True,
+                      auto_set=False)
+            z = Range(0, 19, desc='pixel coord z', enter_set=True,
+                      auto_set=False)
+            scaling = Range(-5.0, 5.0, 0.0, desc='Radiance scaling logarithmic')
+            
+            traits_view  = View(
+                VGroup(
+                    Item('img_container', editor=ComponentEditor(), show_label=False),
+                    'y',
+                    'x',
+                    'z',
+                    'scaling'
+                    ),
+                resizable = True,
+            )
+        
+            def __init__(self, H):
+                super(resultAnalayzer, self).__init__()
+        
+                self.H = H
+                
+                #
+                # Prepare all the plots.
+                # ArrayPlotData - A class that holds a list of numpy arrays.
+                # Plot - Represents a correlated set of data, renderers, and
+                # axes in a single screen region.
+                #
+                img = np.zeros((128, 128), dtype=np.float)
+                
+                self.plotdata = ArrayPlotData()
+                self._updateImg(img)
+                
+                self.img_container = Plot(self.plotdata)
+                self.img_container.img_plot('result_img', colormap=gray)
+                        
+            def _updateImg(self, img):
+                img = img * 10**self.scaling
+                img[img<0] = 0
+                img[img>255] = 255
+                
+                self.plotdata.set_data('result_img', img.astype(np.uint8))
+
+            @on_trait_change('x, y, z, scaling')
+            def update_volume(self):
+                V = np.zeros(cart_grids.shape)
+                V[self.y, self.x, self.z] = 0.1
+                img = self.H * V
+                
+                self._updateImg(img)
+                
+        
+        app = resultAnalayzer(H2*H1)
+        app.configure_traits()
+    
     @unittest.skip("not implemented")    
     def test2D(self):
     
