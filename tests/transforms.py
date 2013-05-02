@@ -21,6 +21,9 @@ class TestTransforms(unittest.TestCase):
         
         from scipy.sparse import lil_matrix
         
+        in_grids = spt.Grids(np.arange(10), np.arange(10), np.arange(10))
+        out_grids = spt.Grids(np.arange(10), np.arange(10), np.arange(10))
+        
         A = lil_matrix((1000, 1000))
         A[0, :100] = np.random.rand(100)
         A[1, 100:200] = A[0, :100]
@@ -33,7 +36,7 @@ class TestTransforms(unittest.TestCase):
         B.setdiag(np.random.rand(1000))
         B.tocsr()
 
-        T1 = spt.BaseTransform(A)
+        T1 = spt.BaseTransform(A, in_grids=in_grids, out_grids=out_grids)
         T2 = spt.BaseTransform(B)
         
         C = T1 + T2
@@ -56,11 +59,10 @@ class TestTransforms(unittest.TestCase):
         self.assertTrue(np.allclose(T3.H.todense(), -(T1.H.todense())))
 
         T1.save('./test_save_transform')
-        T4 = spt.BaseTransform.load('./test_save_transform')
+        T4 = spt.loadTransform('./test_save_transform')
         
         self.assertTrue(np.allclose(T1.H.todense(), T4.H.todense()))
         
-
     def test02(self):
         """Test the direction transform"""
         
@@ -68,7 +70,7 @@ class TestTransforms(unittest.TestCase):
         
         t0 = time.time()
         
-        H = spt.DirectionTransform(self.grids, 0, np.pi/2)
+        H = spt.directionTransform(self.grids, 0, np.pi/2)
         
         print time.time() - t0
     
@@ -88,7 +90,7 @@ class TestTransforms(unittest.TestCase):
         
         t0 = time.time()
         
-        H = spt.SensorTransform(
+        H = spt.sensorTransform(
             in_grids=self.grids,
             sensor_center=(1.0, 1., 0.0),
             sensor_res=16,
@@ -117,7 +119,7 @@ class TestTransforms(unittest.TestCase):
         
         Y, X, Z = self.grids.expanded
         
-        H = spt.IntegralTransform(
+        H = spt.integralTransform(
             in_grids=self.grids
         )
         
@@ -138,8 +140,9 @@ class TestTransforms(unittest.TestCase):
         
         Y, X, Z = self.grids.expanded
         
-        H = spt.CumsumTransform(
-            in_grids=self.grids
+        H = spt.cumsumTransform(
+            in_grids=self.grids,
+            direction=-1
         )
         
         x = (X<1.).astype(np.float)
@@ -155,11 +158,19 @@ class TestTransforms(unittest.TestCase):
     def test06(self):
         """Test the SensorTransform"""
         
-        cart_grids = spt.Grids(np.linspace(0, 50, 20), np.linspace(0, 50, 20), np.linspace(0, 50, 20))
+        cart_grids = spt.Grids(
+            np.arange(0, 50000, 1000.0),
+            np.arange(0, 50000, 1000.0),
+            np.arange(0, 10000, 100.0)
+        )
         
-        H1 = spt.SensorTransform(in_grids=cart_grids, sensor_center=(25.0, 25.0, 0.0), sensor_res=128, depth_res=30, samples_num=4000)
-        H2 = spt.IntegralTransform(in_grids=H1.out_grids)
-        
+        #H1 = spt.sensorTransform(in_grids=cart_grids, sensor_center=(25001.0, 25001.0, 1.0), sensor_res=128, depth_res=100, samples_num=8000, replicate=40)
+        #H1.save('./sensor_transform')
+        H1 = spt.loadTransform('./sensor_transform')
+        #H2 = spt.IntegralTransform(in_grids=H1.out_grids)
+        #H2.save('./integral_transform')
+        H2 = spt.loadTransform('./integral_transform')
+                
         #
         # Create the GUI
         #
@@ -167,15 +178,16 @@ class TestTransforms(unittest.TestCase):
         from enthought.traits.ui.api import View, Item, VGroup, EnumEditor
         from enthought.chaco.api import Plot, ArrayPlotData, gray
         from enthought.enable.component_editor import ComponentEditor
+        import atmotomo
 
         class resultAnalayzer(HasTraits):
             """Gui Application"""
             
-            x = Range(0, 19, desc='pixel coord x', enter_set=True,
+            x = Range(0, 49, 24, desc='pixel coord x', enter_set=True,
                       auto_set=False)
-            y = Range(0, 19, desc='pixel coord y', enter_set=True,
+            y = Range(0, 49, 24, desc='pixel coord y', enter_set=True,
                       auto_set=False)
-            z = Range(0, 19, desc='pixel coord z', enter_set=True,
+            z = Range(0, 99, desc='pixel coord z', enter_set=True,
                       auto_set=False)
             scaling = Range(-5.0, 5.0, 0.0, desc='Radiance scaling logarithmic')
             
@@ -190,11 +202,14 @@ class TestTransforms(unittest.TestCase):
                 resizable = True,
             )
         
-            def __init__(self, H):
+            def __init__(self, H1, H2):
                 super(resultAnalayzer, self).__init__()
         
-                self.H = H
+                self.H1 = H1
+                self.H2 = H2
                 
+                self.mu = atmotomo.calcScatterMu(self.H1.inv_grids, np.pi/4)
+
                 #
                 # Prepare all the plots.
                 # ArrayPlotData - A class that holds a list of numpy arrays.
@@ -220,12 +235,130 @@ class TestTransforms(unittest.TestCase):
             def update_volume(self):
                 V = np.zeros(cart_grids.shape)
                 V[self.y, self.x, self.z] = 0.1
-                img = self.H * V
+                
+                #temp = (self.H1 * V) * atmotomo.calcHG(self.mu, .7) * np.exp(-self.H1 * V)
+                temp = (self.H1 * V)
+                
+                img = self.H2 * temp
                 
                 self._updateImg(img)
                 
         
-        app = resultAnalayzer(H2*H1)
+        app = resultAnalayzer(H1, H2)
+        app.configure_traits()
+    
+    def test07(self):
+        """Test the SensorTransform"""
+        
+        cart_grids = spt.Grids(
+            np.arange(0, 50000, 1000.0),
+            np.arange(0, 50000, 1000.0),
+            np.arange(0, 10000, 100.0)
+        )
+        
+        #H1 = spt.SensorTransform(in_grids=cart_grids, sensor_center=(25001.0, 25001.0, 1.0), sensor_res=128, depth_res=100, samples_num=8000, replicate=40)
+        #H1.save('./sensor_transform')
+        H1 = spt.loadTransform('./sensor_transform')
+        #H2 = spt.IntegralTransform(in_grids=H1.out_grids)
+        #H2.save('./integral_transform')
+        H2 = spt.loadTransform('./integral_transform')
+                
+        #
+        # Create the GUI
+        #
+        from enthought.traits.api import HasTraits, Range, on_trait_change, Float, Instance
+        from enthought.traits.ui.api import View, Item, VGroup, EnumEditor, HGroup
+        from enthought.chaco.api import Plot, ArrayPlotData, gray
+        from enthought.enable.component_editor import ComponentEditor
+        from mayavi.core.ui.api import MlabSceneModel, SceneEditor
+        from mayavi import mlab
+        import atmotomo
+
+        class resultAnalayzer(HasTraits):
+            """Gui Application"""
+            
+            x = Range(0, 49, 24, desc='pixel coord x', enter_set=True,
+                      auto_set=False)
+            y = Range(0, 49, 24, desc='pixel coord y', enter_set=True,
+                      auto_set=False)
+            z = Range(0, 99, desc='pixel coord z', enter_set=True,
+                      auto_set=False)
+            scaling = Range(-5.0, 5.0, 0.0, desc='Radiance scaling logarithmic')
+
+            scene = Instance(MlabSceneModel, ())
+            
+            traits_view  = View(
+                VGroup(
+                    HGroup(
+                        Item('img_container', editor=ComponentEditor(), show_label=False),
+                        Item('scene',
+                             editor=SceneEditor(), height=250,
+                             width=300),
+                    ),                        
+                    'y',
+                    'x',
+                    'z',
+                    'scaling'
+                    ),
+                resizable = True,
+            )
+        
+            def __init__(self, H1, H2):
+                super(resultAnalayzer, self).__init__()
+        
+                self.H1 = H1
+                self.H2 = H2
+                
+                self.mu = atmotomo.calcScatterMu(self.H1.inv_grids, np.pi/4)
+
+                #
+                # Prepare all the plots.
+                # ArrayPlotData - A class that holds a list of numpy arrays.
+                # Plot - Represents a correlated set of data, renderers, and
+                # axes in a single screen region.
+                #
+                img = np.zeros((128, 128), dtype=np.float)
+                
+                self.plotdata = ArrayPlotData()
+                self._updateImg(img)
+                
+                self.img_container = Plot(self.plotdata)
+                self.img_container.img_plot('result_img', colormap=gray)
+                        
+            @on_trait_change('scene.activated')
+            def updateScene(self):
+                mlab.clf(figure=self.scene.mayavi_scene)
+                
+                X, Y = np.mgrid[-1:1:128j, -1:1:128j]
+        
+                self.scene.mlab.surf(X, Y, self.img, colormap='gist_earth', warp_scale='auto')
+                self.scene.mlab.axes()
+                
+            def _updateImg(self, img):
+                img = img * 10**self.scaling
+                #img[img<0] = 0
+                #img[img>255] = 255
+                
+                self.img = img
+                
+                self.plotdata.set_data('result_img', img.astype(np.uint8))
+                self.updateScene()
+                
+            @on_trait_change('x, y, z, scaling')
+            def update_volume(self):
+                V = np.zeros(cart_grids.shape)
+                V[self.y, self.x, self.z] = 0.1
+                
+                temp = (self.H1 * V) * atmotomo.calcHG(self.mu, .7)
+                
+                img = self.H2 * temp
+
+                print img.min(), img.max()
+                
+                self._updateImg(img)
+                
+        
+        app = resultAnalayzer(H1, H2)
         app.configure_traits()
     
     @unittest.skip("not implemented")    

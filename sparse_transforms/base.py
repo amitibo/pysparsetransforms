@@ -11,7 +11,7 @@ import os
 import pickle
 import scipy.io as sio
 
-__all__ = ['BaseTransform', 'Grids', 'GeneralGrids', 'calcTransformMatrix']
+__all__ = ['BaseTransform', 'Grids', 'GeneralGrids', 'calcTransformMatrix', 'loadTransform']
 
 
 class Grids(object):
@@ -51,7 +51,7 @@ class Grids(object):
     def save(self, path):
         """Save a copy of the grid"""
         
-        np.savez(self._grids, path)
+        np.savez(path, *self._grids)
 
     @classmethod
     def load(cls, path):
@@ -383,7 +383,7 @@ class BaseTransform(object):
             'inv': inv_path
             }
         
-        with open(path, 'w') as f:
+        with open(base_path+ext, 'w') as f:
             pickle.dump(
                 paths,
                 f
@@ -398,20 +398,20 @@ class BaseTransform(object):
         if ext == '':
             ext = '.pkl'
         
-        with open(path, 'r') as f:
+        with open(base_path+ext, 'r') as f:
             paths = pickle.load(f)
         
         H = sio.loadmat(paths['H'])['H']
         if paths['in']:
-            in_grids = Grids.load(path['in'])
+            in_grids = Grids.load(paths['in'])
         else:
             in_grids = None
         if paths['out']:
-            out_grids = Grids.load(path['out'])
+            out_grids = GeneralGrids.load(paths['out'])
         else:
             out_grids = None
         if paths['inv']:
-            inv_grids = Grids.load(path['inv'])
+            inv_grids = GeneralGrids.load(paths['inv'])
         else:
             inv_grids = None
             
@@ -434,6 +434,11 @@ class BaseTransform(object):
         return new_obj
 
 
+def loadTransform(path):
+    
+    return BaseTransform.load(path)
+
+    
 def spdiag(X):
     """
     Return a sparse diagonal matrix. The elements of the diagonal are made of 
