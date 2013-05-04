@@ -306,13 +306,12 @@ def sensorTransform(
             #
             # Calculate weights
             # Note:
-            # The weights are divided by the samples.size. samples.size is relative to the length of the
-            # bin, this way we get the concentration at the bin and not the sum. This is important as
-            # later we multiply the the length of the bin when integrating.
+            # The weights are multiplied by the meter/sample ratio and averaged over the replicates.
+            # This gives an averaged concentration per meter.
             #
             weights = []
             for i, ind in enumerate(uniq_indices):
-                weights.append((inv_indices == i).sum() / samples.size)
+                weights.append((inv_indices == i).sum() * R_max / samples_num / replicate)
 
             #
             # Sum up the indices and weights
