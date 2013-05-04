@@ -91,7 +91,7 @@ def integralTransform(
 
     temp = range(in_grids.ndim)
     temp.remove(axis)
-    out_grids = [in_grids[i] for i in temp]
+    out_grids = [in_grids[i].ravel() for i in temp]
 
     return BaseTransform(
         H=H,
@@ -198,7 +198,10 @@ def sensorTransform(
     #
     # Calculate depth bins
     #
-    depth_bins = np.logspace(np.log10(R_samples[0]), np.log10(R_samples[-1]+R_step), depth_res+1)
+    #depth_bins = np.logspace(np.log10(R_samples[0]), np.log10(R_samples[-1]+R_step), depth_res+1)
+    temp = np.linspace(0, 1, depth_res+1)
+    temp = np.cumsum(temp)
+    depth_bins = temp / temp[-1] * R_samples[-1]
     samples_bin = np.digitize(R_samples, depth_bins)
     samples_array = []
     for i in range(1, depth_res+1):
@@ -223,7 +226,7 @@ def sensorTransform(
     X_inv = R * np.sin(THETA) * np.cos(PHI)
     Z_inv = R * np.cos(THETA)
 
-    inv_grids = GeneralGrids(Y_inv, X_inv, Z_inv)
+    inv_grids = Grids(Y_inv, X_inv, Z_inv)
 
     #
     # Randomly replicate rays inside each pixel
@@ -260,7 +263,6 @@ def sensorTransform(
             DZ_ray.reshape((-1, replicate)),
             R_dither.ravel(),
             ):
-
             if np.all(r > 1):
                 indptr.append(indptr[-1])
                 continue
@@ -306,7 +308,7 @@ def sensorTransform(
             #
             weights = []
             for i, ind in enumerate(uniq_indices):
-                weights.append((inv_indices == i).sum())
+                weights.append((inv_indices == i).sum()/ samples_num)
 
             #
             # Sum up the indices and weights

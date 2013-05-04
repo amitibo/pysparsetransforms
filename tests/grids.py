@@ -8,13 +8,13 @@ class TestGrids(unittest.TestCase):
     
     def setUp(self):
         
-        self.Y = np.linspace(0, 1, 10)
+        self.Y = np.linspace(0, 2, 20)
         self.X = np.linspace(0, 2, 20)
-        self.Z = np.linspace(0, 3, 30)
+        self.Z = np.linspace(0, 2, 20)
         
         self.grids = spt.Grids(self.Y, self.X, self.Z)
         self.expanded_grids = np.mgrid[0:2:20j, 0:2:20j, 0:2:20j]
-        self.general_grids = spt.GeneralGrids(*self.expanded_grids)
+        self.general_grids = spt.Grids(*self.expanded_grids)
         
     def test01(self):
         """Check shape"""

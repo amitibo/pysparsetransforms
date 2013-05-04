@@ -11,7 +11,7 @@ import os
 import pickle
 import scipy.io as sio
 
-__all__ = ['BaseTransform', 'Grids', 'GeneralGrids', 'calcTransformMatrix', 'loadTransform']
+__all__ = ['BaseTransform', 'Grids', 'calcTransformMatrix', 'loadTransform']
 
 
 class Grids(object):
@@ -26,9 +26,17 @@ class Grids(object):
         self._ndim = len(grids)
         
         for i, grid in enumerate(grids):
-            inds = [1] * self._ndim
-            inds[i] = -1
-            open_grids.append(np.array(grid).copy().reshape(inds))
+            array = np.array(grid).copy()
+            
+            if array.ndim == 1:
+                #
+                # 1D arrays (like the arrays created by linspace) are reshaped to ndim arrays.
+                #
+                inds = [1] * self._ndim
+                inds[i] = -1
+                array.shape = inds
+                
+            open_grids.append(array)
         
         self._grids = open_grids
         
@@ -84,6 +92,9 @@ class Grids(object):
     def expanded(self):
         """Expand the open grids to full grids"""
         
+        if self.isExpanded:
+            return self._grids
+        
         expanded_grids = []
         for i, grid in enumerate(self._grids):
             tiles = list(self.shape)
@@ -91,10 +102,19 @@ class Grids(object):
             expanded_grids.append(np.tile(grid, tiles))
         
         return expanded_grids
-            
+    
+    @property
+    def isExpanded(self):
+        """Check if the grids are expanded"""
+        
+        return self.shape == self._grids[0].shape
+    
     @property
     def closed(self):
         """Retrun a list of closed grids (i.e. include the upper border of the grid)"""
+        
+        if self.isExpanded:
+            raise NotImplementedError('Not implemented for expanded grids')
         
         closed_grids = []
         for grid in self._grids:
@@ -110,13 +130,28 @@ class Grids(object):
         """
     
         derivatives = []
-        for grid in self._grids:
-            derivative = np.abs(grid.ravel()[1:] - grid.ravel()[:-1])
-            derivative = np.concatenate((derivative, (derivative[-1],)))
-            derivatives.append(derivative)
+        for i, grid in enumerate(self._grids):
+            inds1 = [slice(None)] * self.ndim
+            inds1[i] = slice(1, None)
+            inds2 = [slice(None)] * self.ndim
+            inds2[i] = slice(None, -1)
+            
+            derivative = np.abs(grid[inds1] - grid[inds2])
+            derivative = self._duplicateLastValue(derivative, axis=i)
+            derivatives.append(np.ascontiguousarray(derivative))
     
         return derivatives
 
+    def _duplicateLastValue(self, grid, axis):
+        """Duplicate the last value of a grid in direction detrmined by axis."""
+        
+        inds = [slice(None)] * self.ndim
+        inds[axis] = -1
+        new_shape = list(grid.shape)
+        new_shape[axis] = -1
+        
+        return np.concatenate((grid, grid[inds].reshape(new_shape)), axis=axis)
+        
     def translate(self, translation):
         """
         Return a Grid object which is a translation of the original grid.
@@ -130,33 +165,6 @@ class Grids(object):
 
         return Grids(*translated_grids)
             
-    def rotate(self, rotation):
-        raise NotImplemented('Not implemented yet')
-
-
-class GeneralGrids(Grids):
-    """
-    A class that eases the use of grids. This class is meant for use
-    with general (not rectilinear) grids.
-    """
-    
-    def __init__(self, *grids):
-        
-        self._ndim = len(grids)
-        self._grids = grids
-        
-    @property
-    def expanded(self):
-        """Expand the open grids to full grids"""
-        
-        return self._grids
-            
-    @property
-    def closed(self):
-        """Retrun a list of closed grids (i.e. include the upper border of the grid)"""
-        
-        raise NotImplemented('Not implemented yet')
-
     def rotate(self, ai, aj, ak):
         """
         Return a Grid object which is a rotation of the original grid.
@@ -164,6 +172,9 @@ class GeneralGrids(Grids):
         """
         
         assert self.ndim == 3, 'Rotation supports only 3D grids'
+        
+        if not self.isExpanded:
+            self = Grids(self.expanded)
         
         H_rot = euler_matrix(ai, aj, ak)
         
@@ -174,9 +185,9 @@ class GeneralGrids(Grids):
         for i in range(self.ndim):
             rotated_grids.append(XYZ_rotated[i, :].reshape(self.shape))
             
-        return GeneralGrids(*rotated_grids)
+        return Grids(*rotated_grids)
 
-            
+  
 def patchUnaryMethods(cls, method_name):
     """ Add unary methods to a class."""
     
@@ -282,7 +293,7 @@ class BaseTransform(object):
         The set of grids over which the input is defined.
     out_grids : Grids object
         The set of grids over which the output is defined.
-    inv_grids : GeneralGrids object
+    inv_grids : Grids object
         The out_grids projected back into the in_grids.
     T : type(self)
         The transpose of the transform.
@@ -331,7 +342,7 @@ class BaseTransform(object):
             The set of grids over which the input is defined.
         out_grids : tuple of open grids
             The set of grids over which the output is defined.
-        inv_grids : GeneralGrids object
+        inv_grids : Grids object
             The out_grids projected back into the in_grids.
         """
         
@@ -407,11 +418,11 @@ class BaseTransform(object):
         else:
             in_grids = None
         if paths['out']:
-            out_grids = GeneralGrids.load(paths['out'])
+            out_grids = Grids.load(paths['out'])
         else:
             out_grids = None
         if paths['inv']:
-            inv_grids = GeneralGrids.load(paths['inv'])
+            inv_grids = Grids.load(paths['inv'])
         else:
             inv_grids = None
             

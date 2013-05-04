@@ -6,6 +6,23 @@ import numpy as np
 import time
 
 
+def imshow(img, ax=None, *args, **kwargs):
+    if ax is None:
+        ax = plt.gca()
+    im = ax.imshow(img, *args, **kwargs)
+    
+    def format_coord(x, y):
+        x = int(x+0.5)
+        y = int(y+0.5)
+        
+        return 'r=%d, c=%d, val=%g' % (x, y, img[y, x])
+    
+    ax.format_coord = format_coord
+    
+    ax.figure.canvas.draw()
+    return im
+
+
 class TestTransforms(unittest.TestCase):
     
     def setUp(self):
@@ -167,9 +184,9 @@ class TestTransforms(unittest.TestCase):
         #H1 = spt.sensorTransform(in_grids=cart_grids, sensor_center=(25001.0, 25001.0, 1.0), sensor_res=128, depth_res=100, samples_num=8000, replicate=40)
         #H1.save('./sensor_transform')
         H1 = spt.loadTransform('./sensor_transform')
-        #H2 = spt.IntegralTransform(in_grids=H1.out_grids)
-        #H2.save('./integral_transform')
-        H2 = spt.loadTransform('./integral_transform')
+        H2 = spt.integralTransform(in_grids=H1.out_grids)
+        H2.save('./integral_transform')
+        #H2 = spt.loadTransform('./integral_transform')
                 
         #
         # Create the GUI
@@ -248,7 +265,7 @@ class TestTransforms(unittest.TestCase):
         app.configure_traits()
     
     def test07(self):
-        """Test the SensorTransform"""
+        """Test the SensorTransform, same as test06 but with mayavi scene"""
         
         cart_grids = spt.Grids(
             np.arange(0, 50000, 1000.0),
@@ -336,12 +353,10 @@ class TestTransforms(unittest.TestCase):
                 
             def _updateImg(self, img):
                 img = img * 10**self.scaling
-                #img[img<0] = 0
-                #img[img>255] = 255
                 
                 self.img = img
                 
-                self.plotdata.set_data('result_img', img.astype(np.uint8))
+                self.plotdata.set_data('result_img', img)
                 self.updateScene()
                 
             @on_trait_change('x, y, z, scaling')
@@ -349,10 +364,13 @@ class TestTransforms(unittest.TestCase):
                 V = np.zeros(cart_grids.shape)
                 V[self.y, self.x, self.z] = 0.1
                 
-                temp = (self.H1 * V) * atmotomo.calcHG(self.mu, .7)
-                
+                #temp = (self.H1 * V) * atmotomo.calcHG(self.mu, .7) * np.exp(-self.H1 * V)
+                temp = self.H1 * V/10
+                print '------------'
+                print temp.min(), temp.max()
+                #temp = np.exp(-temp)
+                print temp.min(), temp.max()
                 img = self.H2 * temp
-
                 print img.min(), img.max()
                 
                 self._updateImg(img)
@@ -361,6 +379,130 @@ class TestTransforms(unittest.TestCase):
         app = resultAnalayzer(H1, H2)
         app.configure_traits()
     
+    def test08(self):
+        """Test the sensor transform"""
+        
+        import amitibo
+        import mayavi.mlab as mlab
+        
+        H = spt.loadTransform('./sensor_transform')
+        
+        #
+        # Create the GUI
+        #
+        from enthought.traits.api import HasTraits, Range, on_trait_change, Float, Instance
+        from enthought.traits.ui.api import View, Item, VGroup, EnumEditor, HGroup
+        from enthought.chaco.api import Plot, ArrayPlotData, gray
+        from enthought.enable.component_editor import ComponentEditor
+        from mayavi.core.ui.api import MlabSceneModel, SceneEditor
+        from mayavi import mlab
+        import atmotomo
+
+        class resultAnalayzer(HasTraits):
+            """Gui Application"""
+            
+            x = Range(0, 49, 24, desc='pixel coord x', enter_set=True,
+                      auto_set=False)
+            y = Range(0, 49, 24, desc='pixel coord y', enter_set=True,
+                      auto_set=False)
+            z = Range(0, 99, desc='pixel coord z', enter_set=True,
+                      auto_set=False)
+
+            scene1 = Instance(MlabSceneModel, ())
+            scene2 = Instance(MlabSceneModel, ())
+            
+            traits_view  = View(
+                VGroup(
+                    HGroup(
+                        Item('scene1',
+                             editor=SceneEditor(), height=250,
+                             width=300),
+                         Item('scene2',
+                             editor=SceneEditor(), height=250,
+                             width=300),
+                    ),                        
+                    'y',
+                    'x',
+                    'z'
+                    ),
+                resizable = True,
+            )
+        
+            def __init__(self, H):
+                super(resultAnalayzer, self).__init__()
+        
+                self.H = H
+                
+            @on_trait_change('scene1.activated')
+            def createScene1(self):
+                mlab.clf(figure=self.scene1.mayavi_scene)
+                
+                Y, X, Z = self.H.in_grids.expanded
+                
+                self.src1 = mlab.pipeline.scalar_field(Y, X, Z, np.zeros_like(Y), figure=self.scene1.mayavi_scene)
+                ipw_x = mlab.pipeline.image_plane_widget(self.src1, plane_orientation='x_axes')
+                ipw_y = mlab.pipeline.image_plane_widget(self.src1, plane_orientation='y_axes')
+                ipw_z = mlab.pipeline.image_plane_widget(self.src1, plane_orientation='z_axes')
+                mlab.colorbar()
+                mlab.axes()
+                
+            @on_trait_change('scene2.activated')
+            def createScene2(self):
+                mlab.clf(figure=self.scene2.mayavi_scene)
+                
+                Y, X, Z = self.H.out_grids.expanded
+                
+                self.src2 = mlab.pipeline.scalar_field(Y, X, Z,  np.zeros_like(Y), figure=self.scene2.mayavi_scene)
+                ipw_x = mlab.pipeline.image_plane_widget(self.src2, plane_orientation='x_axes')
+                ipw_y = mlab.pipeline.image_plane_widget(self.src2, plane_orientation='y_axes')
+                ipw_z = mlab.pipeline.image_plane_widget(self.src2, plane_orientation='z_axes')
+                mlab.colorbar()
+                mlab.axes()
+                
+            @on_trait_change('x, y, z, scaling')
+            def update_volume(self):
+                V = np.zeros(self.H.in_grids.shape)
+                V[self.y, self.x, self.z] = 1
+                
+                self.src1.mlab_source.scalars = V
+                self.src2.mlab_source.scalars = self.H * V
+                
+                
+        
+        app = resultAnalayzer(H)
+        app.configure_traits()
+    
+    def test09(self):
+        
+        H1 = spt.loadTransform('./sensor_transform')
+        H2 = spt.loadTransform('./integral_transform')
+
+        V = np.zeros(H1.in_grids.shape)
+        V[24, 24, 2] = 0.1
+        
+        temp1 = H1 * V/10
+        img1 = H2 * temp1
+        
+        temp2 = np.exp(-temp1)
+        img2 = H2 * temp2
+        
+        plt.figure()
+        plt.subplot(121)
+        imshow(temp1[:, 60, :], interpolation='nearest')
+        plt.subplot(122)
+        imshow(temp2[:, 60, :], interpolation='nearest')
+        
+        plt.figure()
+        plt.subplot(121)
+        plt.plot(img1[:, 60])
+        plt.subplot(122)
+        plt.plot(img2[:, 60])
+        
+        plt.figure()
+        plt.plot(H2.in_grids.derivatives[0])
+        
+        plt.show()
+        
     @unittest.skip("not implemented")    
     def test2D(self):
     
