@@ -181,19 +181,20 @@ class TestTransforms(unittest.TestCase):
             np.arange(0, 10000, 100.0)
         )
         
-        #H1 = spt.sensorTransform(in_grids=cart_grids, sensor_center=(25001.0, 25001.0, 1.0), sensor_res=128, depth_res=100, samples_num=8000, replicate=40)
-        #H1.save('./sensor_transform')
-        H1 = spt.loadTransform('./sensor_transform')
-        H2 = spt.integralTransform(in_grids=H1.out_grids)
-        H2.save('./integral_transform')
-        #H2 = spt.loadTransform('./integral_transform')
+        H1 = spt.sensorTransform(in_grids=cart_grids, sensor_center=(25001.0, 25001.0, 1.0), sensor_res=128, depth_res=100, samples_num=4000, replicate=40)
+        H1.save('./sensor_transform')
+        #H1 = spt.loadTransform('./sensor_transform')
+        #H2 = spt.integralTransform(in_grids=H1.out_grids)
+        #H2.save('./integral_transform')
+        H2 = spt.loadTransform('./integral_transform')
                 
         #
         # Create the GUI
         #
-        from enthought.traits.api import HasTraits, Range, on_trait_change, Float
-        from enthought.traits.ui.api import View, Item, VGroup, EnumEditor
-        from enthought.chaco.api import Plot, ArrayPlotData, gray
+        from enthought.traits.api import HasTraits, Range, on_trait_change, Float, Instance
+        from enthought.traits.ui.api import View, Item, HGroup, VGroup, EnumEditor
+        from enthought.chaco.api import Plot, ArrayPlotData, gray, PlotLabel
+        from chaco.tools.cursor_tool import CursorTool, BaseCursorTool
         from enthought.enable.component_editor import ComponentEditor
         import atmotomo
 
@@ -207,10 +208,20 @@ class TestTransforms(unittest.TestCase):
             z = Range(0, 99, desc='pixel coord z', enter_set=True,
                       auto_set=False)
             scaling = Range(-5.0, 5.0, 0.0, desc='Radiance scaling logarithmic')
+
+            tr_cross_plot1 = Instance(Plot)
+            tr_cross_plot2 = Instance(Plot)
+            tr_cursor = Instance(BaseCursorTool)
             
             traits_view  = View(
                 VGroup(
-                    Item('img_container', editor=ComponentEditor(), show_label=False),
+                    HGroup(
+                        Item('img_container', editor=ComponentEditor(), show_label=False),
+                        VGroup(
+                            Item('tr_cross_plot1', editor=ComponentEditor(), show_label=False),
+                            Item('tr_cross_plot2', editor=ComponentEditor(), show_label=False),
+                            ),
+                        ),
                     'y',
                     'x',
                     'z',
@@ -235,12 +246,37 @@ class TestTransforms(unittest.TestCase):
                 #
                 img = np.zeros((128, 128), dtype=np.float)
                 
-                self.plotdata = ArrayPlotData()
-                self._updateImg(img)
+                self.plotdata = ArrayPlotData(result_img=img)
                 
                 self.img_container = Plot(self.plotdata)
-                self.img_container.img_plot('result_img', colormap=gray)
-                        
+                img_plot = self.img_container.img_plot('result_img', colormap=gray)[0]
+
+                self.tr_cursor = CursorTool(
+                    component=img_plot,
+                    drag_button='left',
+                    color='white',
+                    line_width=1.0
+                )                
+                img_plot.overlays.append(self.tr_cursor)
+                self.tr_cursor.current_position = 64, 64
+        
+                self._updateImg(img)
+
+                self.tr_cross_plot1 = Plot(self.plotdata, resizable="h")
+                self.tr_cross_plot1.height = 10
+                plots = self.tr_cross_plot1.plot(("basex", "img_x"))
+                self.tr_cross_plot1.overlays.append(PlotLabel("X section",
+                                              component=self.tr_cross_plot1,
+                                              font = "swiss 16",
+                                              overlay_position="top"))        
+                self.tr_cross_plot2 = Plot(self.plotdata, resizable="h")
+                self.tr_cross_plot2.height = 10
+                plots = self.tr_cross_plot2.plot(("basey", "img_y"))
+                self.tr_cross_plot2.overlays.append(PlotLabel("Y section",
+                                              component=self.tr_cross_plot2,
+                                              font = "swiss 16",
+                                              overlay_position="top"))        
+                
             def _updateImg(self, img):
                 img = img * 10**self.scaling
                 img[img<0] = 0
@@ -248,7 +284,12 @@ class TestTransforms(unittest.TestCase):
                 
                 self.plotdata.set_data('result_img', img.astype(np.uint8))
 
-            @on_trait_change('x, y, z, scaling')
+                self.plotdata.set_data('basex', np.arange(128))
+                self.plotdata.set_data('basey', np.arange(128))
+                self.plotdata.set_data('img_x', img[self.tr_cursor.current_index[1], :])
+                self.plotdata.set_data('img_y', img[:, self.tr_cursor.current_index[0]])
+
+            @on_trait_change('x, y, z, scaling, tr_cursor.current_index')
             def update_volume(self):
                 V = np.zeros(cart_grids.shape)
                 V[self.y, self.x, self.z] = 0.1
