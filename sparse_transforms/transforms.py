@@ -184,8 +184,8 @@ def sensorTransform(
     # Convert image pixels to ray direction
     # The image is assumed the [-1, 1]x[-1, 1] square.
     #
-    Y_sensor, step = np.linspace(-1.0, 1.0, sensor_res, endpoint=False, retstep=True)
-    X_sensor = np.linspace(-1.0, 1.0, sensor_res, endpoint=False)
+    Y_sensor, step = np.linspace(-1.0, 1.0, sensor_res[0], endpoint=False, retstep=True)
+    X_sensor = np.linspace(-1.0, 1.0, sensor_res[1], endpoint=False)
 
     #
     # Calculate sample steps along ray
@@ -193,7 +193,7 @@ def sensorTransform(
     R_max = np.max(np.sqrt(centered_grids.expanded[0]**2 + centered_grids.expanded[1]**2 + centered_grids.expanded[2]**2))
     R_samples, R_step = np.linspace(0.0, R_max, samples_num, retstep=True)
     R_samples = R_samples[1:]
-    R_dither = np.random.rand(sensor_res, sensor_res) * R_step * dither_noise
+    R_dither = np.random.rand(*sensor_res) * R_step * dither_noise
 
     #
     # Calculate depth bins
@@ -328,7 +328,7 @@ def sensorTransform(
 
     H = sps.csr_matrix(
         (data, indices, indptr),
-        shape=(sensor_res*sensor_res*depth_res, centered_grids.size)
+        shape=(sensor_res[0]*sensor_res[1]*depth_res, centered_grids.size)
     )
 
     return BaseTransform(
