@@ -45,13 +45,13 @@ class TestTransforms(unittest.TestCase):
         A[0, :100] = np.random.rand(100)
         A[1, 100:200] = A[0, :100]
         A.setdiag(np.random.rand(1000))
-        A.tocsr()
+        A = A.tocsr()
         
         B = lil_matrix((1000, 1000))
         B[0, :100] = np.random.rand(100)
         B[1, 100:200] = B[0, :100]
         B.setdiag(np.random.rand(1000))
-        B.tocsr()
+        B = B.tocsr()
 
         T1 = spt.BaseTransform(A, in_grids=in_grids, out_grids=out_grids)
         T2 = spt.BaseTransform(B)

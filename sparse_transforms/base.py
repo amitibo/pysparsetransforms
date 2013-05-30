@@ -379,14 +379,18 @@ class BaseTransform(object):
         else:
             inv_path = None
         
-        sio.savemat(
+        #
+        # Only saving of csr matrices is supported.
+        #
+        H = self.H.tocsr()
+        np.savez(
             H_path,
-            {
-                'H': self.H,
-            },
-            do_compression=True
+            data=H.data,
+            indices=H.indices,
+            indptr=H.indptr,
+            shape=np.array(H.shape)
         )
-            
+
         paths = {
             'H': H_path,
             'in': in_path,
@@ -411,8 +415,10 @@ class BaseTransform(object):
         
         with open(base_path+ext, 'r') as f:
             paths = pickle.load(f)
+            
+        H_data = np.load(paths['H']+'.npz')
+        H = sps.csr_matrix((H_data['data'], H_data['indices'], H_data['indptr']), shape=H_data['shape'])
         
-        H = sio.loadmat(paths['H'])['H']
         if paths['in']:
             in_grids = Grids.load(paths['in'])
         else:
