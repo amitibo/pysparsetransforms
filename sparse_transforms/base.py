@@ -11,7 +11,7 @@ import os
 import pickle
 import scipy.io as sio
 
-__all__ = ['BaseTransform', 'Grids', 'calcTransformMatrix', 'loadTransform']
+__all__ = ['BaseTransform', 'Grids', 'calcTransformMatrix', 'loadTransform', 'spdiag']
 
 
 class Grids(object):
