@@ -110,7 +110,7 @@ class TestTransforms(unittest.TestCase):
         H = spt.sensorTransform(
             in_grids=self.grids,
             sensor_center=(1.0, 1., 0.0),
-            sensor_res=16,
+            sensor_res=(16, 16),
             depth_res=16
         )
         
@@ -181,9 +181,9 @@ class TestTransforms(unittest.TestCase):
             np.arange(0, 10000, 100.0)
         )
         
-        H1 = spt.sensorTransform(in_grids=cart_grids, sensor_center=(25001.0, 25001.0, 1.0), sensor_res=128, depth_res=100, samples_num=4000, replicate=40)
-        H1.save('./sensor_transform')
-        #H1 = spt.loadTransform('./sensor_transform')
+        #H1 = spt.sensorTransform(in_grids=cart_grids, sensor_center=(25001.0, 25001.0, 1.0), sensor_res=128, depth_res=100, samples_num=4000, replicate=40)
+        #H1.save('./sensor_transform')
+        H1 = spt.loadTransform('./sensor_transform')
         #H2 = spt.integralTransform(in_grids=H1.out_grids)
         #H2.save('./integral_transform')
         H2 = spt.loadTransform('./integral_transform')
@@ -236,7 +236,8 @@ class TestTransforms(unittest.TestCase):
                 self.H1 = H1
                 self.H2 = H2
                 
-                self.mu = atmotomo.calcScatterMu(self.H1.inv_grids, np.pi/4)
+                self.mu = atmotomo.calcScatterMu(self.H1.inv_grids, -np.pi/4)
+                self.R_derivatives = (spt.Grids(*H1.out_grids.derivatives).expanded)[0]
 
                 #
                 # Prepare all the plots.
@@ -295,7 +296,8 @@ class TestTransforms(unittest.TestCase):
                 V[self.y, self.x, self.z] = 0.1
                 
                 #temp = (self.H1 * V) * atmotomo.calcHG(self.mu, .7) * np.exp(-self.H1 * V)
-                temp = (self.H1 * V)
+                temp = (self.H1 * V) * atmotomo.calcHG(self.mu, .7) * self.R_derivatives
+                #temp = (self.H1 * V)
                 
                 img = self.H2 * temp
                 

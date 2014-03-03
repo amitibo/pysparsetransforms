@@ -3,12 +3,13 @@
 
 from __future__ import division
 import numpy as np
+import numpy.linalg as linalg
 import scipy.sparse as sps
 from .base import *
 from cytransforms import point2grids, direction2grids
 import itertools
 
-__all__ = ['directionTransform', 'integralTransform', 'sensorTransform', 'cumsumTransform']
+__all__ = ['directionTransform', 'integralTransform', 'sensorTransform', 'sensorTransformK', 'cumsumTransform']
 
 
 def directionTransform(
@@ -329,6 +330,184 @@ def sensorTransform(
     H = sps.csr_matrix(
         (data, indices, indptr),
         shape=(sensor_res[0]*sensor_res[1]*depth_res, centered_grids.size)
+    )
+
+    return BaseTransform(
+        H=H,
+        in_grids=in_grids,
+        out_grids=out_grids,
+        inv_grids=inv_grids
+    )
+
+
+def sensorTransformK(
+    in_grids,
+    cameraMatrix,
+    distCoeffs,
+    T,
+    sensor_res,
+    depth_res,
+    samples_num=1000,
+    dither_noise=10,
+    replicate=10
+    ):
+    """
+    Calculate Cartesian to polar transform.
+    The camera is defined internally using the cameraMatrix and distCoeffs as returned from the opencv calibration functions.
+    The camera is defined externally using the T transformation between camera coordinates and the outer world (atmosphere coords).
+    NOTE:
+    Currently it doesn't support fisheye cameras. This is because we don't check 
+    """
+    
+    #
+    # Input grids
+    #
+    Y, X, Z = in_grids.closed
+
+    Y_sensor = np.arange(sensor_res[0])
+    X_sensor = np.arange(sensor_res[1])
+
+    #
+    # Calculate sample steps along ray
+    #
+    R_max = np.max(np.sqrt(in_grids.expanded[0]**2 + in_grids.expanded[1]**2 + in_grids.expanded[2]**2))
+    R_samples, R_step = np.linspace(0.0, R_max, samples_num, retstep=True)
+    R_samples = R_samples[1:]
+    R_dither = np.random.rand(*sensor_res) * R_step * dither_noise
+
+    #
+    # Calculate depth bins
+    #
+    #depth_bins = np.logspace(np.log10(R_samples[0]), np.log10(R_samples[-1]+R_step), depth_res+1)
+    temp = np.linspace(0, 1, depth_res+1)
+    temp = np.cumsum(temp)
+    depth_bins = temp / temp[-1] * R_samples[-1]
+    samples_bin = np.digitize(R_samples, depth_bins)
+    samples_array = []
+    for i in range(1, depth_res+1):
+        samples_array.append(R_samples[samples_bin==i].reshape((-1, 1)))
+
+    #
+    # Create the output grids
+    #
+    out_grids = Grids(depth_bins[:-1], Y_sensor, X_sensor)
+
+    #
+    # Randomly replicate rays inside each pixel
+    # step is the unit of pixels.
+    #
+    step = 1
+    X_sensor = np.tile(X_sensor[:, :, np.newaxis], [1, 1, replicate])
+    Y_sensor = np.tile(Y_sensor[:, :, np.newaxis], [1, 1, replicate])
+    X_sensor += np.random.rand(*X_sensor.shape)*step
+    Y_sensor += np.random.rand(*Y_sensor.shape)*step
+
+    #
+    # Calculate rays angles
+    # R_sensor is the radius from the center of the image (0, 0) to the
+    # pixel. It is used for calculating th ray direction (PHI, THETA)
+    # and for filtering pixels outside the image (radius > 1).
+    #
+    cameraMatrix_inv = np.linalg.inv(cameraMatrix)
+    temp = np.array((X_sensor.ravel(), Y_sensor.ravel(), np.ones(X_sensor.size)))
+    DXY = np.dot(cameraMatrix_inv, temp)
+    DX_ray = DXY[0, :].reshape(X_sensor.shape)
+    DY_ray = DXY[1, :].reshape(X_sensor.shape)
+    DZ_ray = np.sqrt(np.ones_like(DX_ray) - DX_ray**2 - DY_ray**2)
+
+    #
+    # Calculate inverse grid
+    # TODO:
+    # The inverse grids need to take into account the transformation of the camera.
+    #
+    R = out_grids[0]
+    Y_ray = (r_dither+samples) * dy
+    X_ray = (r_dither+samples) * dx
+    Z_ray = (r_dither+samples) * dz
+    temp = np.array((X_ray.ravel(), Y_ray.ravel(), Z_ray.ravel(), np.ones(X_ray.size)))
+    XYZ_inv = np.dot(T, temp)
+    X_inv = XYZ[0, :].reshape(X_ray.shape)
+    Y_inv = XYZ[1, :].reshape(X_ray.shape)
+    Z_inv = XYZ[2, :].reshape(X_ray.shape)
+    inv_grids = Grids(Y_inv, X_inv, Z_inv)
+
+    #
+    # Loop on all rays
+    #
+    data = []
+    indices = []
+    indptr = [0]
+    for samples in samples_array:
+        for dy, dx, dz, r_dither in itertools.izip(
+            DY_ray.reshape((-1, replicate)),
+            DX_ray.reshape((-1, replicate)),
+            DZ_ray.reshape((-1, replicate)),
+            R_dither.ravel(),
+            ):
+            #
+            # Calculate the samples in camera coords
+            #
+            Y_ray = (r_dither+samples) * dy
+            X_ray = (r_dither+samples) * dx
+            Z_ray = (r_dither+samples) * dz
+            
+            #
+            # Calculate the samples in world coords
+            #
+            temp = np.array((X_ray.ravel(), Y_ray.ravel(), Z_ray.ravel(), np.ones(X_ray.size)))
+            XYZ = np.dot(T, temp)
+            X_world_ray = XYZ[0, :].reshape(X_ray.shape)
+            Y_world_ray = XYZ[1, :].reshape(X_ray.shape)
+            Z_world_ray = XYZ[2, :].reshape(X_ray.shape)
+            
+            #
+            # Calculate the atmosphere indices
+            #
+            Y_indices = np.searchsorted(Y, Y_world_ray.ravel())
+            X_indices = np.searchsorted(X, X_world_ray.ravel())
+            Z_indices = np.searchsorted(Z, Z_world_ray.ravel())
+
+            Y_filter = (Y_indices > 0) * (Y_indices < Y.size)
+            X_filter = (X_indices > 0) * (X_indices < X.size)
+            Z_filter = (Z_indices > 0) * (Z_indices < Z.size)
+
+            filtered = Y_filter*X_filter*Z_filter
+            Y_indices = Y_indices[filtered]-1
+            X_indices = X_indices[filtered]-1
+            Z_indices = Z_indices[filtered]-1
+
+            #
+            # Calculate unique indices
+            #
+            inds_ray = (Y_indices*in_grids.shape[1] + X_indices)*in_grids.shape[2] + Z_indices
+            uniq_indices, inv_indices = np.unique(inds_ray, return_inverse=True)
+
+            #
+            # Calculate weights
+            # Note:
+            # The weights are divided by the number of samples in the voxels, this gives the
+            # averaged concentration in the voxel.
+            #
+            weights = []
+            for i, ind in enumerate(uniq_indices):
+                weights.append((inv_indices == i).sum() / samples.size / replicate)
+
+            #
+            # Sum up the indices and weights
+            #
+            data.append(weights)
+            indices.append(uniq_indices)
+            indptr.append(indptr[-1]+uniq_indices.size)
+
+    #
+    # Create sparse matrix
+    #
+    data = np.hstack(data)
+    indices = np.hstack(indices)
+
+    H = sps.csr_matrix(
+        (data, indices, indptr),
+        shape=(sensor_res[0]*sensor_res[1]*depth_res, in_grids.size)
     )
 
     return BaseTransform(
