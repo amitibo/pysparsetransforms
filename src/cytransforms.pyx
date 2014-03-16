@@ -172,7 +172,7 @@ cdef calcCrossings(
     # Collect the inter indices (grid crossings)
     #
     cdef np.intp_t i, j, k, sort_index
-    cdef np.intp_t points_num
+    cdef np.intp_t points_num, voxels_num
     cdef np.intp_t x_i0, x_i1, y_i0, y_i1, z_i0, z_i1
     cdef np.intp_t dimx = X.size - 1
     cdef np.intp_t dimz = Z.size - 1
@@ -198,14 +198,15 @@ cdef calcCrossings(
     d[1] = p1[1] - p0[1]
     d[2] = p1[2] - p0[2]
     points_num = abs(y_i1 - y_i0) + abs(x_i1 - x_i0) + abs(z_i1 - z_i0)
-
+    voxels_num = points_num + 1
+    
     #
     # Note:
     # The np_r, np_indices arrays are declared separately
     # as these are values that are returned from the function.
     #
-    np_r = np.empty(points_num+1)
-    np_indices = np.empty(points_num+1, dtype=DTYPEi32)
+    np_r = np.empty(voxels_num)
+    np_indices = np.empty(voxels_num, dtype=DTYPEi32)
     cdef double[:] r = np_r
     cdef int[:] indices = np_indices
     
@@ -220,6 +221,10 @@ cdef calcCrossings(
         indices[0] = dimz*(dimx*(y_i0-1) + x_i0-1) + z_i0-1
         return np_r, np_indices
     
+    #
+    # Interpolate the grid crossing between p0 and p1
+    # I and P are used as the output of the interpolatePoints functions
+    #
     np_I = np.zeros((3, points_num), dtype=DTYPEi32)
     np_P = np.empty((3, points_num))
     cdef int[:, ::1] I = np_I
@@ -233,7 +238,8 @@ cdef calcCrossings(
         sort_index = 2
 
     #
-    # Sort points according to their spatial order
+    # Sort points according to their spatial order. This is done for calculating
+    # the distance between sequential points -> The path along some voxel.
     #
     np_order = np.argsort(P[sort_index, :]).astype(DTYPEi32)
     cdef int[:] order = np_order
@@ -270,7 +276,7 @@ cdef calcCrossings(
     #
     # Calculate path segments length
     #
-    for j in range(points_num+1):
+    for j in range(voxels_num):
         tmpd = 0
         for i in range(3):
             tmpd += (SP[i, j+1] - SP[i, j])**2
@@ -278,19 +284,27 @@ cdef calcCrossings(
         indices[j] = dimz*(dimx*SI[0, j] + SI[1, j]) + SI[2, j]
     
     #
-    # Order the indices
+    # Incase the indices are in decreasing order, reverse the array.
     #
-    if indices[0] > indices[points_num]:
-        for j in range(points_num+1):
+    if indices[0] > indices[voxels_num]:
+        for j in range(voxels_num):
             tmpd = r[j]
-            r[j] = r[points_num-j]
-            r[points_num-j] = tmpd
+            r[j] = r[voxels_num-j]
+            r[voxels_num-j] = tmpd
             tmpi = indices[j]
-            indices[j] = indices[points_num-j]
-            indices[points_num-j] = tmpi
+            indices[j] = indices[voxels_num-j]
+            indices[voxels_num-j] = tmpi
 
     return np_r, np_indices
 
+
+def test_calcCrossings(Y, X, Z, p0, p1):
+    """
+    Allow for testing calcCrossings
+    """
+    
+    return calcCrossings(Y, X, Z, p0, p1)
+    
 
 def limitDGrids(DGrid, Grid, lower_limit, upper_limit):
     """
