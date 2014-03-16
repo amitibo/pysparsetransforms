@@ -27,9 +27,9 @@ class TestTransforms(unittest.TestCase):
     
     def setUp(self):
         
-        self.Y = np.linspace(0, 2, 30)
-        self.X = np.linspace(0, 2, 30)
-        self.Z = np.linspace(0, 2, 30)
+        self.Y = np.linspace(0, 2, 3)
+        self.X = np.linspace(0, 2, 3)
+        self.Z = np.linspace(0, 2, 3)
         
         self.grids = spt.Grids(self.Y, self.X, self.Z)
     
@@ -81,24 +81,33 @@ class TestTransforms(unittest.TestCase):
         self.assertTrue(np.allclose(T1.H.todense(), T4.H.todense()))
         
     def test02(self):
-        """Test the direction transform"""
+        """Test the direction and point transforms"""
         
         Y, X, Z = self.grids.expanded
+        point = (1.0, 1.0, -3.0)
         
         t0 = time.time()
         
-        H = spt.directionTransform(self.grids, 0, np.pi/2)
+        #H1 = spt.directionTransform(self.grids, 0, np.pi/2)
+        H2 = spt.pointTransform(self.grids, point)
         
         print time.time() - t0
     
         x = (Y<.5)
-        y = H * x
+        y1 = H1 * x
+        y2 = H2 * x
         
         import amitibo
         import mayavi.mlab as mlab
         
-        amitibo.viz3D(Y, X, Z, y)
+        mlab.figure()
+        amitibo.viz3D(Y, X, Z, y1)
+        mlab.title('Direction Transform')
+        mlab.figure()
+        amitibo.viz3D(Y, X, Z, y2)
+        mlab.title('Point Transform')        
         mlab.show()
+
         
     def test03(self):
         """Test the sensor transform"""
@@ -110,8 +119,11 @@ class TestTransforms(unittest.TestCase):
         H = spt.sensorTransform(
             in_grids=self.grids,
             sensor_center=(1.0, 1., 0.0),
-            sensor_res=(16, 16),
-            depth_res=16
+            sensor_res=(201, 201),
+            depth_res=30,
+            samples_num=1000,
+            dither_noise=10,
+            replicate=1
         )
         
         print time.time() - t0
@@ -130,6 +142,31 @@ class TestTransforms(unittest.TestCase):
         Y_sensor, X_sensor, Z_sensor = H.out_grids.expanded
         amitibo.viz3D(Y_sensor, X_sensor, Z_sensor, y)
         mlab.show()
+
+    def test_fisheye(self):
+        """Test the fisheye transform"""
+        
+        Y, X, Z = self.grids.expanded
+        
+        t0 = time.time()
+        
+        H = spt.fisheyeTransform(
+            in_grids=self.grids,
+            sensor_center=(1.0, 1., 0.0),
+            sensor_res=(501, 501),
+            samples_num=1000,
+            dither_noise=0.1,
+            replicate=1
+        )
+        
+        print time.time() - t0
+        
+        x = (Z<0.2).astype(np.float)
+        y = H * x
+        
+        plt.gray()
+        plt.imshow(y, interpolation='nearest')
+        plt.show()
 
     def test04(self):
         """Test the integral transform"""
@@ -707,6 +744,27 @@ class TestTransforms(unittest.TestCase):
     
         plt.show()
 
+    def test10(self):
+        """Test the point transform"""
+        
+        Y, X, Z = self.grids.expanded
+        point = (1, 1, -1)
+        
+        t0 = time.time()
+        
+        H = spt.directionTransform(point, self.grids)
+        
+        print time.time() - t0
+    
+        x = (Y<.5)
+        y = H * x
+        
+        import amitibo
+        import mayavi.mlab as mlab
+        
+        amitibo.viz3D(Y, X, Z, y)
+        mlab.show()
+        
 
 if __name__ == '__main__':
     unittest.main()

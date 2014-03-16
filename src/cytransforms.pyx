@@ -21,7 +21,20 @@ DEF eps = 1e-10
 @cython.boundscheck(False)
 @cython.wraparound(False)
 cdef inline np.intp_t local_argsearch_left(double [:] grid, double key):
-
+    """
+    Find the index in the grid where a point resides.
+    The calculation uses a mid point search.
+    The algorithm returns the index left to the point. Will return 0 if below lowest
+    grid index.
+    
+    Parameters:
+    -----------
+    grid : array
+         Closed ended 1D grid.
+    key : double
+         The coordinate of the point.
+    """
+    
     cdef np.intp_t imin = 0
     cdef np.intp_t imax = grid.size
     cdef np.intp_t imid
@@ -35,8 +48,16 @@ cdef inline np.intp_t local_argsearch_left(double [:] grid, double key):
             imax = imid
 
     return imin
-    
 
+    
+def test_local_argsearch_left(grid, key):
+    """
+    Allow for testing local_argsearch_left
+    """
+    
+    return local_argsearch_left(grid, key)
+    
+    
 @cython.boundscheck(False)
 @cython.wraparound(False)
 cdef inline bool interpolatePoints(
@@ -44,14 +65,42 @@ cdef inline bool interpolatePoints(
     np.intp_t i0,
     np.intp_t i1,
     np.intp_t si,
-    np.intp_t dim,
+    np.intp_t grid_dim,
     double[:] p0,
     double[:] d,
     int[:, ::1] I,
     double[:, ::1] P
     ):
+    """
+    Interpolate coordinates of the intersections points
+    between a line and a grid.
+    This function should be run on each dimension separately.
     
-    cdef np.intp_t i, j, k
+    Parameters:
+    -----------
+    grid:
+         Closed ended 1D grid. The function should be run separately for each dimension.
+    i0, i1:
+         First and last intersection indices along the grid.
+    si: int
+        The starting index (in output arrays I and P) where to place the coordinates of the intersection.
+    grid_dim: int
+        Dimension index of the grid
+    p0 : 3 tuple
+        coordinates of the starting point
+    d : 3 tuple
+        distance along each dimension between starting and ending point.
+    I: array 3xPointNum [output]
+        This array marks the advances of the grid indices. It adds up only to the current dimension.
+    P: array 3xPointNum [output]
+        This array marks the coordinates of the intersection point.
+        
+    Retruns:
+    --------
+    True if any points were interpolated, False other wise.
+    """
+    
+    cdef np.intp_t i, dim, k
     cdef np.intp_t dt
     
     if i0 == i1:
@@ -65,9 +114,9 @@ cdef inline bool interpolatePoints(
         dt = 1
     
     #
-    # Loop on the dimension
+    # Loop on all dimensions
     #
-    for j in xrange(3):
+    for dim in xrange(3):
         #
         # Loop on all the intersections of a dimension
         #
@@ -76,18 +125,26 @@ cdef inline bool interpolatePoints(
             #
             # Calculate the indices of the points
             #
-            if j == dim:
-                I[j, i] = dt
+            if dim == grid_dim:
+                I[dim, i] = dt
 
             #
             # Interpolate the value at the point
             #
-            P[j, i] = d[j]/d[dim] * (grid[k]-p0[dim]) + p0[j]
+            P[dim, i] = d[dim]/d[grid_dim] * (grid[k]-p0[grid_dim]) + p0[dim]
 
             i += 1
 
     return True
 
+
+def test_interpolatePoints(grid, i0, i1, si, grid_dim, p0, d, I, P):
+    """
+    Allow for testing interpolatePoints
+    """
+    
+    return interpolatePoints(grid, i0, i1, si, grid_dim, p0, d, I, P)
+    
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
@@ -98,6 +155,19 @@ cdef calcCrossings(
     double[:] p0,
     double[:] p1
     ):
+    """
+    Calculate corssing points of a line between two points
+    and a grid.
+    
+    Parameters:
+    -----------
+    Y, X, Z : arrays
+        Closed ended open (not expanded) grids.
+    p0, p1 : 3 tuple
+        Coordinates of the p0 and p1 point. Note that the points are supposed to reside
+        inside the grid.
+    """
+    
     #
     # Collect the inter indices (grid crossings)
     #
@@ -108,7 +178,11 @@ cdef calcCrossings(
     cdef np.intp_t dimz = Z.size - 1
     cdef double tmpd
     cdef int tmpi
-    
+
+    #
+    # Calculate the indices of the voxel where the
+    # point resides (note that the indices start at 1)
+    #
     y_i0 = local_argsearch_left(Y, p0[0])
     y_i1 = local_argsearch_left(Y, p1[0])
     x_i0 = local_argsearch_left(X, p0[1])
@@ -117,7 +191,7 @@ cdef calcCrossings(
     z_i1 = local_argsearch_left(Z, p1[2])
     
     #
-    # Calculate inter points (grid crossings)
+    # Calculate the number of inter points (grid crossings)
     #
     cdef double[:] d = np.empty(3)
     d[0] = p1[0] - p0[0]
@@ -243,6 +317,17 @@ def limitDGrids(DGrid, Grid, lower_limit, upper_limit):
 
 @cython.boundscheck(False)
 def point2grids(point, Y, X, Z):
+    """
+    Calculate the contribution of each voxel to the path from a point to each voxel.
+    NOTE the current implementation assumes that the point is directly below the grid!
+    
+    Parameters:
+    -----------
+    point: 3 tuple
+        y, x, z coords of the point. NOTE the current implementation assumes that the point is directly below the grid!
+    Y, X, Z: expanded grids
+    
+    """
     
     #
     # Calculate open and centered grids
@@ -256,6 +341,21 @@ def point2grids(point, Y, X, Z):
     p1 = np.array(point, order='C').ravel()
     np_p2 = np.empty(3)    
     cdef double[:] p2 = np_p2
+    np_px = np.empty(3)    
+    cdef double[:] px = np_px
+    
+    #
+    # Calculate the intersection with the BOA (Bottom Of Atmosphere)
+    #
+    boa = np.min(Z_open)
+    DZ = Z - boa
+    ratio = DZ / (Z-p1[2])
+    DX = (X-p1[1]) * ratio
+    DY = (Y-p1[0]) * ratio
+    
+    cdef DTYPEd_t [:] p_DY = DY.ravel()
+    cdef DTYPEd_t [:] p_DX = DX.ravel()
+    cdef DTYPEd_t [:] p_DZ = DZ.ravel()
 
     data = []
     indices = []
@@ -269,17 +369,30 @@ def point2grids(point, Y, X, Z):
         p2[0] = p_Y[i]
         p2[1] = p_X[i]
         p2[2] = p_Z[i]
+
+        #
+        # Intersection of the ray with the TOA
+        #
+        px[0] = p_Y[i] - p_DY[i]
+        px[1] = p_X[i] - p_DX[i]
+        px[2] = boa
         
         #
         # Calculate crossings for line between p1 and p2
         #
-        r, ind = calcCrossings(Y_open, X_open, Z_open, p1, p2)
+        r, ind = calcCrossings(Y_open, X_open, Z_open, px, p2)
 
         #
         # Accomulate the crossings for the sparse matrix
+        # Note:
+        # I remove values lower than some epsilon value.
+        # This way I filter out numerical inacurracies and
+        # negative values.
         #
+        zr = r > eps
+        r = r[zr]
         data.append(r)
-        indices.append(ind)
+        indices.append(ind[zr])
         indptr.append(indptr[-1]+r.size)
 
     #

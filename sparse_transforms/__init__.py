@@ -15,3 +15,4 @@ pySparseTransforms is available under the
 
 from .base import *
 from .transforms import *
+import cytransforms
