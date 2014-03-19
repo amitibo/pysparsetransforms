@@ -8,39 +8,44 @@ from sparse_transforms import cytransforms as cyt
 import unittest
 import matplotlib.pyplot as plt
 
+eps = 1e-10
 
 class TestCytransforms(unittest.TestCase):
     
     def setUp(self):
         
-        self.Y = np.linspace(0, 2, 4)
-        self.X = np.linspace(0, 3, 5)
-        self.Z = np.linspace(0, 4, 6)
-        
+        Y = np.linspace(0, 5, 40)
+        X = np.linspace(0, 5, 40)
+        Z = np.linspace(0, 5, 40)
+
         #
         # The grids are created without the last index as self.Y-Z represent closed
         # grids.
         #
-        self.grids = spt.Grids(self.Y[:-1], self.X[:-1], self.Z[:-1])
+        self.grids = spt.Grids(Y, X, Z)
         
-        self.p0 = np.array((0.1, 0.1, 0.1))
-        self.p1 = np.array((0.1, 0.1, 2.9))
+        self.p0 = np.array((4.9, 4.9, 0.5))
+        self.p1 = np.array((0.1, 0.1, 0.1))
+        self.Y, self.X, self.Z = self.grids.closed
         
+    @unittest.skip("skip")    
     def test01(self):
         """Check local_argsearch_left"""
         
         self.assertTrue(cyt.test_local_argsearch_left(self.Y, 0.1) == 1)
     
+    @unittest.skip("skip")    
     def test02(self):
         """Check calcCrossings"""
         
         r, indices = cyt.test_calcCrossings(self.Y, self.X, self.Z, self.p0, self.p1)
         
-        for inds in zip(*np.unravel_index(indices, self.grids.shape)):
+        for inds in zip(r, *np.unravel_index(indices, self.grids.shape)):
             print inds
             
         self.assertAlmostEqual(r.sum(), np.linalg.norm(self.p1-self.p0), msg='r=%g != d=%g' % (r.sum(), np.linalg.norm(self.p1-self.p0)))
 
+    @unittest.skip("skip")    
     def test03(self):
         """Check interpolatePoints"""
         
@@ -67,7 +72,7 @@ class TestCytransforms(unittest.TestCase):
         fig = plt.figure()        
         ax = fig.add_subplot(111)
         for i, c, m in zip((0, 1), ('r', 'g'), ('o', 'x')):
-            crossing = I[i, :] == 1
+            crossing = I[i, :] != 0
             plt.plot(P[1,crossing], P[0,crossing], c=c, marker=m)        
 
         ax.set_ylim(self.Y[0], self.Y[-1])
@@ -80,7 +85,7 @@ class TestCytransforms(unittest.TestCase):
         fig = plt.figure()        
         ax = fig.add_subplot(111)
         for i, c, m in zip((1, 2), ('r', 'g'), ('o', 'x')):
-            crossing = I[i, :] == 1
+            crossing = I[i, :] != 0
             plt.plot(P[1,crossing], P[2,crossing], c=c, marker=m)        
 
         ax.set_ylim(self.Z[0], self.Z[-1])
@@ -92,6 +97,21 @@ class TestCytransforms(unittest.TestCase):
 
         plt.show()
 
+    #@unittest.skip("skip")
+    def test04(self):
+        """Check calcCrossings"""
+        
+        Y, X, Z = self.grids.closed
+        
+        r, indices = cyt.test_calcCrossings(Y, X, Z, self.p0, self.p1)
+        zr = r > eps
+        r = r[zr]
+        indices = indices[zr]
+        
+        for inds in zip(r, indices, *np.unravel_index(indices, self.grids.shape)):
+            print inds
+            
+        self.assertAlmostEqual(r.sum(), np.linalg.norm(self.p1-self.p0), msg='r=%g != d=%g' % (r.sum(), np.linalg.norm(self.p1-self.p0)))
 
 if __name__ == '__main__':
     unittest.main()

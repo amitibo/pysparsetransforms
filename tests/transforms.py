@@ -27,12 +27,13 @@ class TestTransforms(unittest.TestCase):
     
     def setUp(self):
         
-        self.Y = np.linspace(0, 2, 3)
-        self.X = np.linspace(0, 2, 3)
-        self.Z = np.linspace(0, 2, 3)
+        self.Y = np.linspace(0, 5, 40)
+        self.X = np.linspace(0, 5, 40)
+        self.Z = np.linspace(0, 5, 40)
         
         self.grids = spt.Grids(self.Y, self.X, self.Z)
     
+    @unittest.skip("skip")
     def test01(self):
         """Test basic functions of the transform"""
         
@@ -80,6 +81,7 @@ class TestTransforms(unittest.TestCase):
         
         self.assertTrue(np.allclose(T1.H.todense(), T4.H.todense()))
         
+    @unittest.skip("skip")
     def test02(self):
         """Test the direction and point transforms"""
         
@@ -88,14 +90,12 @@ class TestTransforms(unittest.TestCase):
         
         t0 = time.time()
         
-        #H1 = spt.directionTransform(self.grids, 0, np.pi/2)
-        H2 = spt.pointTransform(self.grids, point)
+        H1 = spt.directionTransform(self.grids, 0, np.pi/2)
         
         print time.time() - t0
     
         x = (Y<.5)
         y1 = H1 * x
-        y2 = H2 * x
         
         import amitibo
         import mayavi.mlab as mlab
@@ -103,12 +103,11 @@ class TestTransforms(unittest.TestCase):
         mlab.figure()
         amitibo.viz3D(Y, X, Z, y1)
         mlab.title('Direction Transform')
-        mlab.figure()
-        amitibo.viz3D(Y, X, Z, y2)
-        mlab.title('Point Transform')        
+ 
         mlab.show()
 
         
+    @unittest.skip("skip")
     def test03(self):
         """Test the sensor transform"""
         
@@ -143,6 +142,7 @@ class TestTransforms(unittest.TestCase):
         amitibo.viz3D(Y_sensor, X_sensor, Z_sensor, y)
         mlab.show()
 
+    @unittest.skip("skip")
     def test_fisheye(self):
         """Test the fisheye transform"""
         
@@ -168,6 +168,7 @@ class TestTransforms(unittest.TestCase):
         plt.imshow(y, interpolation='nearest')
         plt.show()
 
+    @unittest.skip("skip")
     def test04(self):
         """Test the integral transform"""
         
@@ -189,6 +190,7 @@ class TestTransforms(unittest.TestCase):
         plt.imshow(y)
         plt.show()
         
+    @unittest.skip("skip")
     def test05(self):
         """Test the integral transform"""
         
@@ -209,6 +211,7 @@ class TestTransforms(unittest.TestCase):
 
         mlab.show()
     
+    @unittest.skip("skip")
     def test06(self):
         """Test the SensorTransform"""
         
@@ -344,6 +347,7 @@ class TestTransforms(unittest.TestCase):
         app = resultAnalayzer(H1, H2)
         app.configure_traits()
     
+    @unittest.skip("skip")
     def test07(self):
         """Test the SensorTransform, same as test06 but with mayavi scene"""
         
@@ -459,6 +463,7 @@ class TestTransforms(unittest.TestCase):
         app = resultAnalayzer(H1, H2)
         app.configure_traits()
     
+    @unittest.skip("skip")
     def test08(self):
         """Test the sensor transform"""
         
@@ -552,6 +557,7 @@ class TestTransforms(unittest.TestCase):
         app = resultAnalayzer(H)
         app.configure_traits()
     
+    @unittest.skip("skip")
     def test09(self):
         
         H1 = spt.loadTransform('./sensor_transform')
@@ -583,7 +589,7 @@ class TestTransforms(unittest.TestCase):
         
         plt.show()
         
-    @unittest.skip("not implemented")    
+    @unittest.skip("skip")    
     def test2D(self):
     
         from scipy.misc import lena
@@ -646,7 +652,7 @@ class TestTransforms(unittest.TestCase):
         plt.show()
         
     
-    @unittest.skip("not implemented")    
+    @unittest.skip("skip")    
     def test3D(self):
     
         #
@@ -724,7 +730,7 @@ class TestTransforms(unittest.TestCase):
         # plt.imshow(Vit1.reshape(V.shape[:2]))
         # plt.show()
     
-    @unittest.skip("not implemented")    
+    @unittest.skip("skip")    
     def testProjection(self):
     
         from scipy.misc import lena
@@ -743,26 +749,123 @@ class TestTransforms(unittest.TestCase):
         plt.imshow(lp.reshape((256, 256)))
     
         plt.show()
-
+        
+    @unittest.skip("skip")    
     def test10(self):
         """Test the point transform"""
         
         Y, X, Z = self.grids.expanded
-        point = (1, 1, -1)
+        point = np.array((2.5, 2.5, 0.0))
         
         t0 = time.time()
         
-        H = spt.directionTransform(point, self.grids)
+        H = spt.pointTransform(self.grids, point)
         
         print time.time() - t0
-    
-        x = (Y<.5)
+
+        
+        x = np.ones_like(X)
         y = H * x
+        
+        #fig, axes = plt.subplots(1, X.shape[1])
+        
+        #for i, ax in enumerate(axes):
+            #ax.imshow(y[:, i, :], cmap=plt.cm.gray, interpolation='nearest')
+        #plt.show()
         
         import amitibo
         import mayavi.mlab as mlab
         
         amitibo.viz3D(Y, X, Z, y)
+        mlab.show()
+
+    @unittest.skip("skip")    
+    def test11(self):
+        """Test the ability to filter unseen points using the pointTransform"""
+        import copy
+        
+        #
+        # Creat a sphere
+        #
+        Y, X, Z = self.grids.expanded
+        cp = (2.5, 2.5, 2.5)
+        Ball = np.sqrt((Y-cp[0])**2 + (X-cp[1])**2 + (Z-cp[2])**2)
+        V = np.zeros_like(Ball)
+        V[Ball<1.5] = 1
+        
+        #
+        # Create several 'cameras'
+        #
+        cams = []
+        cams_filtered = []
+        for point in ((2.5, 0.1, -0.01),):
+            cam = spt.pointTransform(self.grids, point)
+            cams.append(cam)
+
+            cam_filtered = copy.deepcopy(cam)
+            H_lil = cam_filtered.H.tolil()
+            H_lil.setdiag(np.zeros(self.grids.size))
+            cam_filtered.H =  H_lil.tocsr()
+            
+            cams_filtered.append(cam_filtered)
+        
+        sl = 6
+        fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
+        ax1.imshow((cams[0] * V)[sl, :, :], cmap=plt.cm.gray, interpolation='nearest')
+        ax2.imshow((cams_filtered[0] * V)[sl, :, :], cmap=plt.cm.gray, interpolation='nearest')
+        ax3.imshow( V[sl, :, :], cmap=plt.cm.gray, interpolation='nearest')
+        
+        plt.figure()
+        plt.imshow(cams[0].H.todense()-cams_filtered[0].H.todense(), cmap=plt.cm.gray, interpolation='nearest')
+        plt.show()
+
+    def test12(self):
+        """Test the ability to filter unseen points using the pointTransform"""
+        
+        #
+        # Creat a sphere
+        #
+        Y, X, Z = self.grids.expanded
+        cp = (2.5, 2.5, 2.5)
+        Ball = np.sqrt((Y-cp[0])**2 + (X-cp[1])**2 + (Z-cp[2])**2)
+        V = np.zeros_like(Ball)
+        V[Ball<0.5] = 1
+        
+        #
+        # Create several 'cameras'
+        #
+        cams = []
+        for point in ((0.1, 0.1, 0.5), (0.1, 4.9, 0.5), (4.9, 0.1, 0.5), (4.9, 4.9, 0.5),):
+            cam = spt.pointTransform(self.grids, point)
+
+            H_lil = cam.H.tolil()
+            H_lil.setdiag(np.zeros(self.grids.size))
+            cam.H = H_lil.tocsr()
+            
+            cams.append(cam)
+        
+        #
+        # Check visibility from all cameras
+        #
+        V_filtered = V.copy()
+        visibility_map = np.zeros_like(V_filtered)
+        for cam in cams:
+            temp = (cam * V) == 0
+            visibility_map[temp] += 1
+        
+        V_filtered[visibility_map<1] = 0
+
+        import amitibo
+        import mayavi.mlab as mlab
+        #mlab.figure()
+        #amitibo.viz3D(Y, X, Z, V, interpolation='nearest_neighbour')
+        mlab.figure()
+        amitibo.viz3D(Y, X, Z, V_filtered, interpolation='nearest_neighbour')
+        mlab.figure()
+        amitibo.viz3D(Y, X, Z, visibility_map, interpolation='nearest_neighbour')
+        for cam in cams:
+            mlab.figure()
+            amitibo.viz3D(Y, X, Z, cam * V, interpolation='nearest_neighbour')
         mlab.show()
         
 

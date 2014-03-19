@@ -287,13 +287,8 @@ cdef calcCrossings(
     # Incase the indices are in decreasing order, reverse the array.
     #
     if indices[0] > indices[voxels_num]:
-        for j in range(voxels_num):
-            tmpd = r[j]
-            r[j] = r[voxels_num-j]
-            r[voxels_num-j] = tmpd
-            tmpi = indices[j]
-            indices[j] = indices[voxels_num-j]
-            indices[voxels_num-j] = tmpi
+        np_r = np_r[::-1]
+        np_indices = np_indices[::-1]
 
     return np_r, np_indices
 
@@ -361,15 +356,20 @@ def point2grids(point, Y, X, Z):
     #
     # Calculate the intersection with the BOA (Bottom Of Atmosphere)
     #
-    boa = np.min(Z_open)
-    DZ = Z - boa
-    ratio = DZ / (Z-p1[2])
-    DX = (X-p1[1]) * ratio
-    DY = (Y-p1[0]) * ratio
-    
+    cdef double boa = np.min(Z_open)
+    cdef double pz = boa + eps
+    if p1[2]<=boa:
+        DZ = Z - boa
+        ratio = DZ / (Z-p1[2])
+        DX = X - (X-p1[1]) * ratio
+        DY = Y - (Y-p1[0]) * ratio
+    else:
+        DX = np.zeros_like(X) + p1[1] + eps
+        DY = np.zeros_like(Y) + p1[0] + eps
+        pz = p1[2]
+        
     cdef DTYPEd_t [:] p_DY = DY.ravel()
     cdef DTYPEd_t [:] p_DX = DX.ravel()
-    cdef DTYPEd_t [:] p_DZ = DZ.ravel()
 
     data = []
     indices = []
@@ -385,11 +385,11 @@ def point2grids(point, Y, X, Z):
         p2[2] = p_Z[i]
 
         #
-        # Intersection of the ray with the TOA
+        # Intersection of the ray with the BOA
         #
-        px[0] = p_Y[i] - p_DY[i]
-        px[1] = p_X[i] - p_DX[i]
-        px[2] = boa
+        px[0] = p_DY[i]
+        px[1] = p_DX[i]
+        px[2] = pz
         
         #
         # Calculate crossings for line between p1 and p2
@@ -405,8 +405,9 @@ def point2grids(point, Y, X, Z):
         #
         zr = r > eps
         r = r[zr]
+        ind = ind[zr]
         data.append(r)
-        indices.append(ind[zr])
+        indices.append(ind)
         indptr.append(indptr[-1]+r.size)
 
     #
