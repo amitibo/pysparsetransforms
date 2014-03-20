@@ -2,6 +2,7 @@ import unittest
 
 import matplotlib.pyplot as plt
 import sparse_transforms as spt
+from sparse_transforms import cytransforms as cyt
 import numpy as np
 import time
 
@@ -27,9 +28,9 @@ class TestTransforms(unittest.TestCase):
     
     def setUp(self):
         
-        self.Y = np.linspace(0, 5, 40)
-        self.X = np.linspace(0, 5, 40)
-        self.Z = np.linspace(0, 5, 40)
+        self.Y = np.linspace(0, 5, 31)
+        self.X = np.linspace(0, 5, 31)
+        self.Z = np.linspace(0, 5, 31)
         
         self.grids = spt.Grids(self.Y, self.X, self.Z)
     
@@ -821,51 +822,82 @@ class TestTransforms(unittest.TestCase):
 
     def test12(self):
         """Test the ability to filter unseen points using the pointTransform"""
-        
+        import amitibo
+        import mayavi.mlab as mlab
+
         #
         # Creat a sphere
         #
         Y, X, Z = self.grids.expanded
         cp = (2.5, 2.5, 2.5)
-        Ball = np.sqrt((Y-cp[0])**2 + (X-cp[1])**2 + (Z-cp[2])**2)
-        V = np.zeros_like(Ball)
-        V[Ball<0.5] = 1
+        #Ball = np.sqrt((Y-cp[0])**2 + (X-cp[1])**2 + (Z-cp[2])**2)
+        #V = np.zeros_like(Ball)
+        #V[Ball<0.5] = 1
+        Square = np.maximum(np.maximum(np.abs(Y-cp[0]), np.abs(X-cp[1])), np.abs(Z-cp[2]))
+        V = np.zeros_like(Square)
+        V[Square<1] = 1
         
         #
         # Create several 'cameras'
         #
+        Y_closed, X_closed, Z_closed = self.grids.closed
         cams = []
-        for point in ((0.1, 0.1, 0.5), (0.1, 4.9, 0.5), (4.9, 0.1, 0.5), (4.9, 4.9, 0.5),):
+        cams_coords = []
+        for point in ((2.5, 0.1, 0.5), (0.1, 2.5, 0.5), (2.5, 4.9, 0.5), (4.9, 2.5, 0.5),):
+        #for point in ((2.5, 2.5, 0.5),):
             cam = spt.pointTransform(self.grids, point)
-
-            H_lil = cam.H.tolil()
-            H_lil.setdiag(np.zeros(self.grids.size))
-            cam.H = H_lil.tocsr()
-            
             cams.append(cam)
-        
+
+            #
+            # Find the voxel in which the camera is situated
+            # Note:
+            # We take advantage that the camera is inside the space
+            # or directly below. Therefore only the z axis can be 
+            # negative.
+            cam_i = cyt.test_local_argsearch_left(Y_closed, point[0]) - 1
+            cam_j = cyt.test_local_argsearch_left(X_closed, point[1]) - 1
+            cam_k = cyt.test_local_argsearch_left(Z_closed, point[2]) - 1
+            
+            cams_coords.append((cam_i, cam_j, cam_k))
+            
         #
         # Check visibility from all cameras
         #
         V_filtered = V.copy()
-        visibility_map = np.zeros_like(V_filtered)
-        for cam in cams:
-            temp = (cam * V) == 0
-            visibility_map[temp] += 1
-        
-        V_filtered[visibility_map<1] = 0
+        cum_hiding_map = np.zeros_like(X, dtype=np.uint8)
+        sides_hiding_map = np.zeros_like(X, dtype=np.uint8)
+        mask = np.ones_like(X, dtype=np.bool)
+        for cam, coords in zip(cams, cams_coords):
+            sides_hiding_map[:] = 0
+            for dim in range(3):
+                for ind in range(0, Y.shape[dim]):
+                    mask[:] = False
+                    mask_trans = mask.transpose(np.roll(np.arange(3), -dim))                    
+                    mask_trans[ind, :, :] = True
+                    V_masked = V.copy()
+                    V_trans = V_masked.transpose(np.roll(np.arange(3), -dim))                    
+                    V_trans[mask_trans] = 0
+                    temp_hiding = cam * V_masked
+                    sides_hiding_map[(temp_hiding>0)*mask] += 1
+                    
+                mlab.figure()
+                amitibo.viz3D(Y, X, Z, sides_hiding_map, interpolation='nearest_neighbour')
+                
+            cum_hiding_map[sides_hiding_map>1] += 1
+            mlab.figure()
+            amitibo.viz3D(Y, X, Z, cum_hiding_map, interpolation='nearest_neighbour')
+            
+        #
+        # cum_hiding_map == #cams means that the object is not seen by any camera.
+        #
+        V_filtered[cum_hiding_map==len(cams)] = 0
 
-        import amitibo
-        import mayavi.mlab as mlab
-        #mlab.figure()
-        #amitibo.viz3D(Y, X, Z, V, interpolation='nearest_neighbour')
+        mlab.figure()
+        amitibo.viz3D(Y, X, Z, V, interpolation='nearest_neighbour')
         mlab.figure()
         amitibo.viz3D(Y, X, Z, V_filtered, interpolation='nearest_neighbour')
         mlab.figure()
-        amitibo.viz3D(Y, X, Z, visibility_map, interpolation='nearest_neighbour')
-        for cam in cams:
-            mlab.figure()
-            amitibo.viz3D(Y, X, Z, cam * V, interpolation='nearest_neighbour')
+        amitibo.viz3D(Y, X, Z, cum_hiding_map, interpolation='nearest_neighbour')
         mlab.show()
         
 
