@@ -830,12 +830,12 @@ class TestTransforms(unittest.TestCase):
         #
         Y, X, Z = self.grids.expanded
         cp = (2.5, 2.5, 2.5)
-        #Ball = np.sqrt((Y-cp[0])**2 + (X-cp[1])**2 + (Z-cp[2])**2)
-        #V = np.zeros_like(Ball)
-        #V[Ball<0.5] = 1
-        Square = np.maximum(np.maximum(np.abs(Y-cp[0]), np.abs(X-cp[1])), np.abs(Z-cp[2]))
-        V = np.zeros_like(Square)
-        V[Square<1] = 1
+        Ball = np.sqrt((Y-cp[0])**2 + (X-cp[1])**2 + (Z-cp[2])**2)
+        V = np.zeros_like(Ball)
+        V[Ball<1.5] = 1
+        #Square = np.maximum(np.maximum(np.abs(Y-cp[0]), np.abs(X-cp[1])), np.abs(Z-cp[2]))
+        #V = np.zeros_like(Square)
+        #V[Square<1] = 1
         
         #
         # Create several 'cameras'
@@ -844,7 +844,6 @@ class TestTransforms(unittest.TestCase):
         cams = []
         cams_coords = []
         for point in ((2.5, 0.1, 0.5), (0.1, 2.5, 0.5), (2.5, 4.9, 0.5), (4.9, 2.5, 0.5),):
-        #for point in ((2.5, 2.5, 0.5),):
             cam = spt.pointTransform(self.grids, point)
             cams.append(cam)
 
@@ -880,13 +879,11 @@ class TestTransforms(unittest.TestCase):
                     temp_hiding = cam * V_masked
                     sides_hiding_map[(temp_hiding>0)*mask] += 1
                     
-                mlab.figure()
-                amitibo.viz3D(Y, X, Z, sides_hiding_map, interpolation='nearest_neighbour')
-                
+            #
+            # I require that the voxel will be hidden from at least two directions.
+            #
             cum_hiding_map[sides_hiding_map>1] += 1
-            mlab.figure()
-            amitibo.viz3D(Y, X, Z, cum_hiding_map, interpolation='nearest_neighbour')
-            
+
         #
         # cum_hiding_map == #cams means that the object is not seen by any camera.
         #
@@ -896,8 +893,6 @@ class TestTransforms(unittest.TestCase):
         amitibo.viz3D(Y, X, Z, V, interpolation='nearest_neighbour')
         mlab.figure()
         amitibo.viz3D(Y, X, Z, V_filtered, interpolation='nearest_neighbour')
-        mlab.figure()
-        amitibo.viz3D(Y, X, Z, cum_hiding_map, interpolation='nearest_neighbour')
         mlab.show()
         
 
