@@ -179,6 +179,21 @@ class Grids(object):
 
         return Grids(*translated_grids)
 
+    def scale(self, scale):
+        """
+        Return a Grid object which is a scale of the original grid.
+        """
+        scale = np.array(scale)
+        if scale.size == 1:
+            scale = np.ones(3) * scale
+        assert scale.size == self.ndim, 'translation must have the same dimension of grids'
+
+        scaled_grids = []
+        for grid, s in zip(self._grids, scale):
+            scaled_grids.append(grid * s)
+
+        return Grids(*scaled_grids)
+
     def rotate(self, ai, aj, ak):
         """
         Return a Grid object which is a rotation of the original grid.
