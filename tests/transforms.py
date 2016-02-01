@@ -1,6 +1,6 @@
 import unittest
 
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 import sparse_transforms as spt
 from sparse_transforms import cytransforms as cyt
 import numpy as np
@@ -653,7 +653,7 @@ class TestTransforms(unittest.TestCase):
         plt.show()
         
     
-    @unittest.skip("skip")    
+    #@unittest.skip("skip")    
     def test3D(self):
     
         #
@@ -663,6 +663,7 @@ class TestTransforms(unittest.TestCase):
         # 3D data
         ##############################################################
         Y, X, Z = np.mgrid[-10:10:50j, -10:10:50j, -10:10:50j]
+        grids = spt.Grids(Y, X, Z)
         V = np.sqrt(Y**2 + X**2 + Z**2)
         V_ = V.reshape((-1, 1))
         
@@ -678,10 +679,8 @@ class TestTransforms(unittest.TestCase):
         # Rotation transform
         #
         t0 = time.time()
-        Hrot, rotation, Y_rot, X_rot, Z_rot = spt.rotation3DTransformMatrix(Y, X, Z, (np.pi/4, np.pi/4, 0))
-        Vrot = Hrot * V_
-        Hrot2 = spt.rotation3DTransformMatrix(Y_rot, X_rot, Z_rot, np.linalg.inv(rotation), Y, X, Z)[0]
-        Vrot2 = Hrot2 * Vrot
+        Hrot = spt.rotationTransform(grids, rotation=(np.pi/4, 0, 0))
+        Vrot = Hrot * V
         print time.time() - t0
          
         # #
@@ -701,20 +700,20 @@ class TestTransforms(unittest.TestCase):
         #
         import mayavi.mlab as mlab
         mlab.figure()
-        s = mlab.pipeline.scalar_field(Vrot.reshape(Y_rot.shape))
+        s = mlab.pipeline.scalar_field(Vrot)
         ipw_x = mlab.pipeline.image_plane_widget(s, plane_orientation='x_axes')
         ipw_y = mlab.pipeline.image_plane_widget(s, plane_orientation='y_axes')
         mlab.title('V Rotated')
         mlab.colorbar()
         mlab.outline()
         
-        mlab.figure()
-        s = mlab.pipeline.scalar_field(Vrot2.reshape(Y.shape))
-        ipw_x = mlab.pipeline.image_plane_widget(s, plane_orientation='x_axes')
-        ipw_y = mlab.pipeline.image_plane_widget(s, plane_orientation='y_axes')
-        mlab.title('V Rotated Back')
-        mlab.colorbar()
-        mlab.outline()
+        #mlab.figure()
+        #s = mlab.pipeline.scalar_field(Vrot2.reshape(Y.shape))
+        #ipw_x = mlab.pipeline.image_plane_widget(s, plane_orientation='x_axes')
+        #ipw_y = mlab.pipeline.image_plane_widget(s, plane_orientation='y_axes')
+        #mlab.title('V Rotated Back')
+        #mlab.colorbar()
+        #mlab.outline()
         
         # mlab.figure()
         # mlab.contour3d(Vcs1.reshape(V.shape), contours=[1, 2, 3], transparent=True)
@@ -820,6 +819,7 @@ class TestTransforms(unittest.TestCase):
         plt.imshow(cams[0].H.todense()-cams_filtered[0].H.todense(), cmap=plt.cm.gray, interpolation='nearest')
         plt.show()
 
+    @unittest.skip("skip")    
     def test12(self):
         """Test the ability to filter unseen points using the pointTransform"""
         import amitibo

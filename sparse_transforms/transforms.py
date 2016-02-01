@@ -6,12 +6,14 @@ import numpy as np
 import numpy.linalg as linalg
 import scipy.sparse as sps
 from .base import *
+from .transformation_matrices import euler_matrix
 from cytransforms import point2grids, direction2grids
 import itertools
 
 __all__ = (
     'directionTransform',
     'pointTransform',
+    'rotationTransform',
     'integralTransform',
     'sensorTransform',
     'sensorTransformK',
@@ -64,6 +66,129 @@ def pointTransform(
         in_grids=in_grids,
         out_grids=in_grids
     )
+
+
+def rotationTransform(in_grids, rotation, out_grids=None):
+    """Calculate a transform representing a rotation in 3D.
+    
+    Parameters
+    ----------
+    in_grids : Grids object
+        List of grids. 
+
+    rotation : list of floats or rotation matrix
+        Either a list of floats representating the rotation in euler angles
+        (axis used is 'sxyz'). Alternatively, rotation can be a 4x4 rotation matrix
+    
+    out_grids : Grids object, optional (default=None)
+        List of grids. The grids are expected to be of the form created by mgrid
+        and in the same order of creation. The transform is calculated into these
+        grids. This enables croping of the target domain after the rotation transform.
+        If none, the destination grids will be calculated to contain the full transformed
+        source.
+"""
+
+    if isinstance(rotation, np.ndarray) and rotation.shape == (4, 4):
+        H_rot = rotation
+    else:
+        H_rot = euler_matrix(*rotation)
+        
+    if out_grids == None:
+        Y_dst, X_dst, Z_dst = _calcRotateGrid(in_grids, H_rot)
+    else:
+        Y_dst, X_dst, Z_dst = out_grids
+
+    #
+    # Calculate a rotated grid by applying the rotation.
+    #
+    XYZ_dst = np.vstack((X_dst.ravel(), Y_dst.ravel(), Z_dst.ravel(), np.ones(X_dst.size)))
+    XYZ_src_ = np.dot(np.linalg.inv(H_rot), XYZ_dst)
+
+    Y_indices = XYZ_src_[1, :].reshape(X_dst.shape)
+    X_indices = XYZ_src_[0, :].reshape(X_dst.shape)
+    Z_indices = XYZ_src_[2, :].reshape(X_dst.shape)
+
+    H = calcTransformMatrix(in_grids, (Y_indices, X_indices, Z_indices))
+
+    return BaseTransform(
+        H=H,
+        in_grids=in_grids,
+        out_grids=Grids(Y_dst, X_dst, Z_dst)
+    )
+
+#
+# Some globals
+#
+SPARSE_SIZE_LIMIT = 1e6
+GRID_DIM_LIMIT = 100
+
+def _calcRotateGrid(in_grid, H_rot):
+    #
+    # Calculate the target grid.
+    # The calculation is based on calculating the minimal grid that contains
+    # the transformed input grid.
+    #
+    Y_slim, X_slim, Z_slim = [g.ravel() for g in in_grid]
+    x0_src = np.floor(np.min(X_slim)).astype(np.int)
+    y0_src = np.floor(np.min(Y_slim)).astype(np.int)
+    z0_src = np.floor(np.min(Z_slim)).astype(np.int)
+    x1_src = np.ceil(np.max(X_slim)).astype(np.int)
+    y1_src = np.ceil(np.max(Y_slim)).astype(np.int)
+    z1_src = np.ceil(np.max(Z_slim)).astype(np.int)
+
+    src_coords = np.array(
+        [
+            [x0_src, x0_src, x1_src, x1_src, x0_src, x0_src, x1_src, x1_src],
+            [y0_src, y1_src, y0_src, y1_src, y0_src, y1_src, y0_src, y1_src],
+            [z0_src, z0_src, z0_src, z0_src, z1_src, z1_src, z1_src, z1_src],
+            [1, 1, 1, 1, 1, 1, 1, 1]
+        ]
+    )
+    dst_coords = np.dot(H_rot, src_coords)
+
+    x0_dst, y0_dst, z0_dst, dump = np.floor(np.min(dst_coords, axis=1)).astype(np.int)
+    x1_dst, y1_dst, z1_dst, dump = np.ceil(np.max(dst_coords, axis=1)).astype(np.int)
+
+    #
+    # Calculate the grid density.
+    # Note:
+    # This calculation is important as having a dense grid results in a huge transform
+    # matrix even if it is sparse.
+    #
+    dy, dx, dz = [d[0, 0, 0] for d in in_grid.derivatives]
+
+    delta_src_coords = np.array(
+        [
+            [0, dx, 0, 0, -dx, 0, 0],
+            [0, 0, dy, 0, 0, -dy, 0],
+            [0, 0, 0, dz, 0, 0, -dz],
+            [1, 1, 1, 1, 1, 1, 1]
+        ]
+    )
+    delta_dst_coords = np.dot(H_rot, delta_src_coords)
+    delta_dst_coords.sort(axis=1)
+    delta_dst_coords = delta_dst_coords[:, 1:] - delta_dst_coords[:, :-1]
+    delta_dst_coords[delta_dst_coords<=0] = 10000000
+    
+    dx, dy, dz, dump = np.min(delta_dst_coords, axis=1)
+    x_samples = min(int((x1_dst-x0_dst)/dx), GRID_DIM_LIMIT)
+    y_samples = min(int((y1_dst-y0_dst)/dy), GRID_DIM_LIMIT)
+    z_samples = min(int((z1_dst-z0_dst)/dz), GRID_DIM_LIMIT)
+    
+    dim_ratio = x_samples * y_samples * z_samples / SPARSE_SIZE_LIMIT
+    if  dim_ratio > 1:
+        dim_reduction = dim_ratio ** (-1/3)
+        
+        x_samples = int(x_samples * dim_reduction)
+        y_samples = int(y_samples * dim_reduction)
+        z_samples = int(z_samples * dim_reduction)
+        
+    Y_dst, X_dst, Z_dst = np.mgrid[
+        y0_dst:y1_dst:complex(0, y_samples),
+        x0_dst:x1_dst:complex(0, x_samples),
+        z0_dst:z1_dst:complex(0, z_samples),
+    ]
+    return Y_dst, X_dst, Z_dst
 
 
 def integralTransform(
@@ -735,13 +860,3 @@ def sensorTransformK(
         out_grids=out_grids,
         inv_grids=inv_grids
     )
-
-
-def main():
-    """Main doc """
-
-    pass
-
-
-if __name__ == '__main__':
-    main()

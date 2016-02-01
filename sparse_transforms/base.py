@@ -203,7 +203,7 @@ class Grids(object):
         assert self.ndim == 3, 'Rotation supports only 3D grids'
 
         if not self.isExpanded:
-            self = Grids(self.expanded)
+            self = Grids(*self.expanded)
 
         H_rot = euler_matrix(ai, aj, ak)
 
@@ -561,7 +561,7 @@ def calcTransformMatrix(src_grids, dst_coords):
 
     Returns
     -------
-    H : parse matrix
+    H : sparse matrix
         Sparse matrix, in csr format, representing the transform.
 """
 
@@ -612,7 +612,7 @@ def calcTransformMatrix(src_grids, dst_coords):
 
     dims_range = np.arange(dims)
     strides = np.array(src_grids[0].strides).reshape((-1, 1))
-    strides /= strides[-1]
+    strides = (strides / strides[-1]).astype(np.int64)
     I, J, VALUES = [], [], []
     for sli in itertools.product(*[[0, 1]]*dims):
         i = np.array(sli)
@@ -633,8 +633,6 @@ def calcTransformMatrix(src_grids, dst_coords):
 def coords2Indices(grids, coords):
     """
     """
-
-    import numpy as np
 
     inds = []
     slim_grids = []
