@@ -24,6 +24,39 @@ def imshow(img, ax=None, *args, **kwargs):
     return im
 
 
+def viz3D(grids, V, X_label='X', Y_label='Y', Z_label='Z', title='3D Visualization', interpolation='linear'):
+
+    import mayavi.mlab as mlab
+    
+    mlab.figure()
+
+    X, Y, Z = grids.expanded
+    src = mlab.pipeline.scalar_field(X, Y, Z, V)
+    src.spacing = [1, 1, 1]
+    src.update_image_data = True    
+    ipw_x = mlab.pipeline.image_plane_widget(src, plane_orientation='x_axes')
+    ipw_x.ipw.reslice_interpolate = interpolation
+    ipw_x.ipw.texture_interpolate = False
+    ipw_y = mlab.pipeline.image_plane_widget(src, plane_orientation='y_axes')
+    ipw_y.ipw.reslice_interpolate = interpolation
+    ipw_y.ipw.texture_interpolate = False
+    ipw_z = mlab.pipeline.image_plane_widget(src, plane_orientation='z_axes')
+    ipw_z.ipw.reslice_interpolate = interpolation
+    ipw_z.ipw.texture_interpolate = False
+    mlab.colorbar()
+    mlab.outline()
+    mlab.xlabel(X_label)
+    mlab.ylabel(Y_label)
+    mlab.zlabel(Z_label)
+
+    limits = []
+    for grid in (X, Y, Z):
+        limits += [grid.min()]
+        limits += [grid.max()]
+    mlab.axes(ranges=limits)
+    mlab.title(title)
+
+
 class TestTransforms(unittest.TestCase):
     
     def setUp(self):
@@ -699,25 +732,9 @@ class TestTransforms(unittest.TestCase):
         # 3D visualization
         #
         import mayavi.mlab as mlab
-        mlab.figure()
-        s = mlab.pipeline.scalar_field(Vrot)
-        ipw_x = mlab.pipeline.image_plane_widget(s, plane_orientation='x_axes')
-        ipw_y = mlab.pipeline.image_plane_widget(s, plane_orientation='y_axes')
-        mlab.title('V Rotated')
-        mlab.colorbar()
-        mlab.outline()
         
-        #mlab.figure()
-        #s = mlab.pipeline.scalar_field(Vrot2.reshape(Y.shape))
-        #ipw_x = mlab.pipeline.image_plane_widget(s, plane_orientation='x_axes')
-        #ipw_y = mlab.pipeline.image_plane_widget(s, plane_orientation='y_axes')
-        #mlab.title('V Rotated Back')
-        #mlab.colorbar()
-        #mlab.outline()
-        
-        # mlab.figure()
-        # mlab.contour3d(Vcs1.reshape(V.shape), contours=[1, 2, 3], transparent=True)
-        # mlab.outline()
+        viz3D(grids, V)
+        viz3D(Hrot.out_grids, Vrot)
         
         mlab.show()
         

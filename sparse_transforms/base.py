@@ -4,9 +4,10 @@
 from __future__ import division
 import numpy as np
 import scipy.sparse as sps
+import itertools
 import copy
 import types
-from .transformation_matrices import euler_matrix
+from sparse_transforms.transformation_matrices import euler_matrix
 import os
 import pickle
 import scipy.io as sio
@@ -157,7 +158,7 @@ class Grids(object):
         return derivatives
 
     def _duplicateLastValue(self, grid, axis):
-        """Duplicate the last value of a grid in direction detrmined by axis."""
+        """Duplicate the last value of a grid in direction determined by axis."""
 
         inds = [slice(None)] * self.ndim
         inds[axis] = -1
@@ -486,8 +487,7 @@ def loadTransform(path):
 
 
 def spdiag(X):
-    """
-    Return a sparse diagonal matrix. The elements of the diagonal are made of
+    """Return a sparse diagonal matrix. The elements of the diagonal are made of
     the elements of the vector X.
 
     Parameters
@@ -499,9 +499,7 @@ def spdiag(X):
     -------
     H : sparse matrix
         Sparse diagonal matrix, in dia format.
-"""
-
-    import scipy.sparse as sps
+    """
 
     return sps.dia_matrix((X.ravel(), 0), (X.size, X.size)).tocsr()
 
@@ -546,85 +544,80 @@ def count_unique(keys, dists):
     return uniq_keys, uniq_dists
 
 
-def calcTransformMatrix(src_grids, dst_coords):
-    """
+def calcTransformMatrix(src_grids, dst_grids):
+    """Coords Transform Matrix
+    
     Calculate a sparse transformation matrix. The transform
-    is represented as a mapping from the src_coords to the dst_coords.
+    is represented as a mapping from the src_grids to the dst_grids.
 
     Parameters
     ----------
     src_grids : list of arrays
         Array of source grids.
 
-    dst_coords : list of arrays
+    dst_grids : list of arrays
         Array of destination grids as points in the source grids.
 
     Returns
     -------
     H : sparse matrix
         Sparse matrix, in csr format, representing the transform.
-"""
-
-    import numpy as np
-    import scipy.sparse as sps
-    import itertools
+    """
 
     #
     # Shape of grid
     #
-    src_shape = src_grids[0].shape
-    src_size = np.prod(np.array(src_shape))
-    dst_shape = dst_coords[0].shape
-    dst_size = np.prod(np.array(dst_shape))
-    dims = len(src_shape)
+    dst_size = dst_grids.size
+    dims = 3
 
     #
     # Calculate grid indices of coords.
     #
-    indices, src_grids_slim = coords2Indices(src_grids, dst_coords)
+    indices, src_grids_slim = coords2Indices(src_grids, dst_grids)
 
     #
     # Filter out coords outside of the grids.
     #
     nnz = np.ones(indices[0].shape, dtype=np.bool_)
-    for ind, dim in zip(indices, src_shape):
+    for ind, dim in zip(indices, src_grids.shape):
         nnz *= (ind > 0) * (ind < dim)
 
     dst_indices = np.arange(dst_size)[nnz]
     nnz_indices = []
     nnz_coords = []
-    for ind, coord in zip(indices, dst_coords):
+    for ind, coord in zip(indices, dst_grids):
         nnz_indices.append(ind[nnz])
         nnz_coords.append(coord.ravel()[nnz])
 
     #
     # Calculate the transform matrix.
+    # The matrix uses linear interpolation 
     #
-    diffs = []
+    fracts = []
     indices = []
     for grid, coord, ind in zip(src_grids_slim, nnz_coords, nnz_indices):
-        diffs.append([grid[ind] - coord, coord - grid[ind-1]])
+        fracts.append([grid[ind] - coord, coord - grid[ind-1]])
         indices.append([ind-1, ind])
 
-    diffs = np.array(diffs)
-    diffs /= np.sum(diffs, axis=1).reshape((dims, 1, -1))
+    fracts = np.array(fracts)
+    fracts /= np.sum(fracts, axis=1).reshape((dims, 1, -1))
     indices = np.array(indices)
 
     dims_range = np.arange(dims)
     strides = np.array(src_grids[0].strides).reshape((-1, 1))
-    strides = (strides / strides[-1]).astype(np.int64)
+    strides = (strides / strides[-1]).astype(strides.dtype)
+    
     I, J, VALUES = [], [], []
-    for sli in itertools.product(*[[0, 1]]*dims):
-        i = np.array(sli)
-        c = indices[dims_range, sli, Ellipsis]
-        v = diffs[dims_range, sli, Ellipsis]
+    for slice_ in itertools.product(*[[0, 1]]*dims):
         I.append(dst_indices)
-        J.append(np.sum(c*strides, axis=0))
+        j = indices[dims_range, slice_, Ellipsis]
+        J.append(np.sum(j*strides, axis=0))
+        v = fracts[dims_range, slice_, Ellipsis]
         VALUES.append(np.prod(v, axis=0))
 
     H = sps.coo_matrix(
         (np.array(VALUES).ravel(), np.array((np.array(I).ravel(), np.array(J).ravel()))),
-        shape=(dst_size, src_size)
+        shape=(dst_size, src_grids.size)
         ).tocsr()
 
     return H
