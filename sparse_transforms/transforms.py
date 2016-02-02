@@ -96,17 +96,17 @@ def rotationTransform(in_grids, rotation, out_grids=None):
     if out_grids == None:
         Y_dst, X_dst, Z_dst = _calcRotatedGrids(in_grids, H_rot)
     else:
-        Y_dst, X_dst, Z_dst = out_grids
+        Y_dst, X_dst, Z_dst = out_grids.expanded
 
     #
     # Calculate a rotated grid by applying the rotation.
     #
     XYZ_dst = np.vstack((X_dst.ravel(), Y_dst.ravel(), Z_dst.ravel(), np.ones(X_dst.size)))
-    XYZ_src_ = np.dot(np.linalg.inv(H_rot), XYZ_dst)
+    XYZ_inv = np.dot(np.linalg.inv(H_rot), XYZ_dst)
 
-    Y_inv = XYZ_src_[1, :].reshape(X_dst.shape)
-    X_inv = XYZ_src_[0, :].reshape(X_dst.shape)
-    Z_inv = XYZ_src_[2, :].reshape(X_dst.shape)
+    Y_inv = XYZ_inv[1, :].reshape(X_dst.shape)
+    X_inv = XYZ_inv[0, :].reshape(X_dst.shape)
+    Z_inv = XYZ_inv[2, :].reshape(X_dst.shape)
 
     inv_grids = Grids(Y_inv, X_inv, Z_inv)
     out_grids = Grids(Y_dst, X_dst, Z_dst)
@@ -221,7 +221,7 @@ def integralTransform(
 
     grid_shape = in_grids.shape
     strides = np.array(in_grids.expanded[0].strides)
-    strides /= strides[-1]
+    strides = (strides / strides[-1]).astype(strides.dtype)
 
     derivatives = in_grids.derivatives
 
@@ -251,9 +251,14 @@ def integralTransform(
     if jacobian != None:
         H = H * spdiag(jacobian)
 
+    #
+    # Calculate the output grid
+    #
     temp = range(in_grids.ndim)
     temp.remove(axis)
-    out_grids = [in_grids[i].ravel() for i in temp]
+    dims = [slice(None)] * in_grids.ndim
+    dims[axis] = 0
+    out_grids = [in_grids[i][dims] for i in temp]
 
     return BaseTransform(
         H=H,
@@ -290,7 +295,7 @@ def cumsumTransform(
 
     grid_shape = in_grids.shape
     strides = np.array(in_grids.expanded[0].strides)
-    strides /= strides[-1]
+    strides = (strides / strides[-1]).astype(strides.dtype)
 
     derivatives = in_grids.derivatives
 

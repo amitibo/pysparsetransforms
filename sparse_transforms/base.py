@@ -146,12 +146,14 @@ class Grids(object):
 
         derivatives = []
         for i, grid in enumerate(self._grids):
-            inds1 = [slice(None)] * self.ndim
+            inds1 = [0] * self.ndim
             inds1[i] = slice(1, None)
-            inds2 = [slice(None)] * self.ndim
+            inds2 = [0] * self.ndim
             inds2[i] = slice(None, -1)
 
-            derivative = np.abs(grid[inds1] - grid[inds2])
+            shape = [1] * self.ndim
+            shape[i] = -1
+            derivative = np.abs(grid[inds1] - grid[inds2]).reshape(shape)
             derivative = self._duplicateLastValue(derivative, axis=i)
             derivatives.append(np.ascontiguousarray(derivative))
 
@@ -544,18 +546,19 @@ def count_unique(keys, dists):
     return uniq_keys, uniq_dists
 
 
-def calcTransformMatrix(src_grids, dst_grids):
+def calcTransformMatrix(src_grids, inv_grids):
     """Coords Transform Matrix
     
     Calculate a sparse transformation matrix. The transform
     is represented as a mapping from the src_grids to the dst_grids.
+    The transform uses first order linear interpolation.
 
     Parameters
     ----------
     src_grids : list of arrays
         Array of source grids.
 
-    dst_grids : list of arrays
+    inv_grids : list of arrays
         Array of destination grids as points in the source grids.
 
     Returns
@@ -567,13 +570,15 @@ def calcTransformMatrix(src_grids, dst_grids):
     #
     # Shape of grid
     #
-    dst_size = dst_grids.size
+    inv_size = inv_grids.size
     dims = 3
 
+    src_grids = Grids(*src_grids.expanded)
+    
     #
     # Calculate grid indices of coords.
     #
-    indices, src_grids_slim = coords2Indices(src_grids, dst_grids)
+    indices, src_grids_slim = coords2Indices(src_grids, inv_grids)
 
     #
     # Filter out coords outside of the grids.
@@ -582,10 +587,10 @@ def calcTransformMatrix(src_grids, dst_grids):
     for ind, dim in zip(indices, src_grids.shape):
         nnz *= (ind > 0) * (ind < dim)
 
-    dst_indices = np.arange(dst_size)[nnz]
+    inv_indices = np.arange(inv_size)[nnz]
     nnz_indices = []
     nnz_coords = []
-    for ind, coord in zip(indices, dst_grids):
+    for ind, coord in zip(indices, inv_grids):
         nnz_indices.append(ind[nnz])
         nnz_coords.append(coord.ravel()[nnz])
 
@@ -609,7 +614,7 @@ def calcTransformMatrix(src_grids, dst_grids):
     
     I, J, VALUES = [], [], []
     for slice_ in itertools.product(*[[0, 1]]*dims):
-        I.append(dst_indices)
+        I.append(inv_indices)
         j = indices[dims_range, slice_, Ellipsis]
         J.append(np.sum(j*strides, axis=0))
         v = fracts[dims_range, slice_, Ellipsis]
@@ -617,7 +622,7 @@ def calcTransformMatrix(src_grids, dst_grids):
 
     H = sps.coo_matrix(
         (np.array(VALUES).ravel(), np.array((np.array(I).ravel(), np.array(J).ravel()))),
-        shape=(dst_size, src_grids.size)
+        shape=(inv_size, src_grids.size)
         ).tocsr()
 
     return H
@@ -627,6 +632,8 @@ def coords2Indices(grids, coords):
     """
     """
 
+    grids = grids.expanded
+    
     inds = []
     slim_grids = []
     for dim, (grid, coord) in enumerate(zip(grids, coords)):

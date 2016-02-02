@@ -695,11 +695,13 @@ class TestTransforms(unittest.TestCase):
         ##############################################################
         # 3D data
         ##############################################################
-        Y, X, Z = np.mgrid[-10:10:50j, -10:10:50j, -10:10:50j]
-        grids = spt.Grids(Y, X, Z)
-        V = np.sqrt(Y**2 + X**2 + Z**2)
-        V_ = V.reshape((-1, 1))
+        Y = np.linspace(-5, 5, 50)
+        X = np.linspace(-5, 5, 50)
+        Z = np.linspace(-5, 5, 50)
         
+        grids = spt.Grids(Y, X, Z)
+        Y, X, Z = grids.expanded
+        V = np.sqrt(Y**2 + X**2 + Z**2)
         # #
         # # Spherical transform
         # #
@@ -712,7 +714,7 @@ class TestTransforms(unittest.TestCase):
         # Rotation transform
         #
         t0 = time.time()
-        Hrot = spt.rotationTransform(grids, rotation=(np.pi/4, 0, 0))
+        Hrot = spt.rotationTransform(grids, rotation=(0, np.pi/4, 0), out_grids=grids)
         Vrot = Hrot * V
         print time.time() - t0
          
@@ -722,16 +724,27 @@ class TestTransforms(unittest.TestCase):
         # Hcs1 = cumsumTransformMatrix((Y, X, Z), axis=0, direction=-1)
         # Vcs1 = Hcs1 * V_
     
-        # #
-        # # Integral transform
-        # #
-        # Hit1 = integralTransformMatrix((Y, X, Z), axis=0, direction=-1)
-        # Vit1 = Hit1 * V_
-    
+        #
+        # Integral transform
+        #
+        Hint = spt.integralTransform(grids, axis=2)
+        Hintrot = spt.integralTransform(Hrot.out_grids, axis=2)
+        Vint = Hint * V
+        Vintrot = Hintrot * Vrot
+        
+        import mayavi.mlab as mlab
+        import matplotlib.pyplot as plt
+        plt.figure()
+        plt.imshow(Vint)
+        plt.colorbar()
+        plt.figure()
+        plt.imshow(Vintrot)
+        plt.colorbar()
+        plt.show()
+        
         #
         # 3D visualization
         #
-        import mayavi.mlab as mlab
         
         viz3D(grids, V)
         viz3D(Hrot.out_grids, Vrot)
