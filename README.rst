@@ -15,27 +15,10 @@ compilers. Use ``setup.py``::
    python setup.py install
 
 
-Reading the docs
-================
+Examples
+========
 
-After installing::
-
-   cd doc
-   make html
-
-Then, direct your browser to ``build/html/index.html``.
-
-
-Testing
-=======
-
-To run the tests with the interpreter available as ``python``, use::
-
-   cd tests
-   python grids.py
-   python transforms.py
-
-Some tests require other packages (e.g. mayavi).
+Have a look at the included ipython notebook for example use.
 
 Conditions for use
 ==================
