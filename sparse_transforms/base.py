@@ -178,7 +178,7 @@ class Grids(object):
 
         translated_grids = []
         for grid, delta in zip(self._grids, translation):
-            translated_grids.append(grid + delta)
+            translated_grids.append(grid - delta)
 
         return Grids(*translated_grids)
 
@@ -208,7 +208,7 @@ class Grids(object):
         if not self.isExpanded:
             self = Grids(*self.expanded)
 
-        H_rot = euler_matrix(ai, aj, ak)
+        H_rot = np.linalg.inv(euler_matrix(ai, aj, ak))
 
         XYZ = np.vstack([grid.ravel() for grid in self._grids] + [np.ones(self.size)])
         XYZ_rotated = np.dot(H_rot, XYZ)
